@@ -27,6 +27,7 @@ let languageClient: JuliaLanguageClient | undefined;
 let languageServerStarting: Promise<void> | undefined;
 let _context: vscode.ExtensionContext | undefined;
 let _testFeature: import('./testing/testFeature').TestFeature | undefined;
+let _getJuliaSession: () => import('./session').JuliaSession | undefined = () => undefined;
 
 export function getLanguageClient(): JuliaLanguageClient | undefined {
 	return languageClient;
@@ -78,8 +79,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Register commands
 	registerCommands(context, juliaRuntimeManager);
 
-	// Register runtime completion provider (uses Jupyter complete_request via callMethod)
-	registerCompletionProvider(context);
+	// Module-level session getter used by the completion provider and the LSP
+	// repl/getCompletions bridge.
+	_getJuliaSession = () => juliaRuntimeManager.getActiveJuliaSession();
+
+	// Register runtime completion provider (uses REPL.completions via the
+	// active Julia session, capturing output through a temp file).
+	registerCompletionProvider(context, _getJuliaSession);
 
 	// Register statement range provider (Ctrl+Enter multiline support)
 	registerStatementRangeProvider(context);
@@ -277,7 +283,7 @@ async function doStartLanguageServer(
 				if (!query.trim()) {
 					return { matches: [], cursor_start: 0, cursor_end: 0 };
 				}
-				return await getRuntimeCompletions(query) ?? { matches: [], cursor_start: 0, cursor_end: query.length };
+				return await getRuntimeCompletions(_getJuliaSession, query) ?? { matches: [], cursor_start: 0, cursor_end: query.length };
 			};
 
 			client.onRequest('repl/getcompletions', handleGetCompletions);
