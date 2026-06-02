@@ -6,14 +6,62 @@
 /**
  * Runtime completion provider for Julia.
  *
- * Uses the Jupyter `complete_request` message via `callMethod` on the active
- * Julia session.  This is fully silent (no console output, no history entry)
- * and is the standard Jupyter protocol mechanism for completions.
+ * Uses Julia's REPL.completions via positron.runtime.executeCode (Silent mode)
+ * so the query is fully invisible — no console output, no history entry.
  */
 
 import * as vscode from 'vscode';
 import * as positron from 'positron';
 import { LOGGER } from './extension';
+
+/**
+ * Escape a string for embedding as a Julia double-quoted string literal.
+ */
+function escapeForJulia(s: string): string {
+	return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+}
+
+/**
+ * Build the Julia snippet that runs REPL.completions and prints results to
+ * stdout in the form:
+ *   <cursor_start_0indexed>\n<match1>\n<match2>\n...
+ *
+ * All output is captured via ExecutionObserver.onOutput; nothing reaches the
+ * user's console.
+ */
+function buildCompletionSnippet(query: string): string {
+	const escaped = escapeForJulia(query);
+	const cursorPos = query.length;
+	// Single-line so it's easy to pass to executeCode. The try/catch prevents
+	// any error (e.g. incomplete input) from propagating to the user.
+	return (
+		`try; import REPL; ` +
+		`local cs, range, _ = REPL.completions("${escaped}", ${cursorPos}); ` +
+		`print(first(range) - 1); ` +
+		`foreach(c -> print("\\n", REPL.completion_text(c)), cs); ` +
+		`catch; end`
+	);
+}
+
+/**
+ * Parse the stdout produced by buildCompletionSnippet into a ReplCompletionResult.
+ */
+function parseCompletionOutput(stdout: string, queryLength: number): ReplCompletionResult | null {
+	const lines = stdout.trim().split('\n');
+	if (!lines[0]) {
+		return null;
+	}
+	const cursor_start = parseInt(lines[0], 10);
+	const matches = lines.slice(1).filter(s => s.length > 0);
+	if (matches.length === 0) {
+		return null;
+	}
+	return {
+		matches,
+		cursor_start: isNaN(cursor_start) ? 0 : cursor_start,
+		cursor_end: queryLength,
+	};
+}
 
 /**
  * Provides runtime completions for Julia by querying the active Julia session.
@@ -32,20 +80,17 @@ export class JuliaRuntimeCompletionProvider implements vscode.CompletionItemProv
 			return undefined;
 		}
 
-		// Find an active Julia session that supports callMethod
-		const sessions = await positron.runtime.getActiveSessions();
-		const juliaSession = sessions.find(
-			s => s.runtimeMetadata.languageId === 'julia' && typeof s.callMethod === 'function'
-		);
-		if (!juliaSession) {
+		const lineText = document.lineAt(position.line).text;
+		const query = lineText.substring(0, position.character);
+
+		if (!query.trim()) {
 			return undefined;
 		}
 
-		// Build the code string up to cursor position
-		const lineText = document.lineAt(position.line).text;
-		const textBeforeCursor = lineText.substring(0, position.character);
-
-		if (!textBeforeCursor.trim()) {
+		// Don't start a new Julia session just for completions.
+		const sessions = await positron.runtime.getActiveSessions();
+		const hasJuliaSession = sessions.some(s => s.runtimeMetadata.languageId === 'julia');
+		if (!hasJuliaSession) {
 			return undefined;
 		}
 
@@ -54,43 +99,40 @@ export class JuliaRuntimeCompletionProvider implements vscode.CompletionItemProv
 		}
 
 		try {
-			// Use Jupyter complete_request via callMethod — fully silent,
-			// does not pollute console or history.
-			const reply = await juliaSession.callMethod!(
-				'complete_request',
-				textBeforeCursor,
-				position.character
+			let stdout = '';
+			await positron.runtime.executeCode(
+				'julia',
+				buildCompletionSnippet(query),
+				false,   // don't steal focus
+				false,   // don't allow incomplete
+				positron.RuntimeCodeExecutionMode.Silent,
+				positron.RuntimeErrorBehavior.Continue,
+				{ token, onOutput: (msg: string) => { stdout += msg; } }
 			);
 
 			if (token.isCancellationRequested) {
 				return undefined;
 			}
 
-			// Jupyter complete_reply format:
-			//   { matches: string[], cursor_start: number, cursor_end: number,
-			//     metadata: object, status: 'ok' | 'error' }
-			const matches: string[] = reply?.matches ?? [];
-			if (matches.length === 0) {
+			const result = parseCompletionOutput(stdout, query.length);
+			if (!result || result.matches.length === 0) {
 				return undefined;
 			}
 
-			// Determine the replacement range from cursor_start/cursor_end
-			const cursorStart: number = reply?.cursor_start ?? 0;
-			const cursorEnd: number = reply?.cursor_end ?? position.character;
 			const replaceRange = new vscode.Range(
-				position.line, cursorStart,
-				position.line, cursorEnd
+				position.line, result.cursor_start,
+				position.line, position.character
 			);
 
-			return matches.map(text => {
+			return result.matches.map(text => {
 				const item = new vscode.CompletionItem(text, vscode.CompletionItemKind.Variable);
 				item.range = replaceRange;
-				item.sortText = ` ${text}`; // Space prefix sorts before LSP items
+				item.sortText = ` ${text}`; // space prefix sorts runtime items before LSP items
 				item.detail = '(runtime)';
 				return item;
 			});
 		} catch (err) {
-			LOGGER.debug(`Runtime completion error: ${err}`);
+			LOGGER.warn(`Runtime completion error: ${err}`);
 			return undefined;
 		}
 	}
@@ -131,7 +173,7 @@ export interface ReplCompletionResult {
 }
 
 /**
- * Queries the active Julia runtime session silently for completions.
+ * Queries the active Julia runtime session for completions.
  * Used to bridge Language Server completions with the REPL session.
  * Returns null when no session is available or the query is empty.
  */
@@ -140,35 +182,28 @@ export async function getRuntimeCompletions(query: string): Promise<ReplCompleti
 		return null;
 	}
 
+	// Don't start a new Julia session just for completions.
+	const sessions = await positron.runtime.getActiveSessions();
+	const hasJuliaSession = sessions.some(s => s.runtimeMetadata.languageId === 'julia');
+	if (!hasJuliaSession) {
+		return null;
+	}
+
 	try {
-		// Find an active Julia session that supports callMethod
-		const sessions = await positron.runtime.getActiveSessions();
-		const juliaSession = sessions.find(
-			s => s.runtimeMetadata.languageId === 'julia' && typeof s.callMethod === 'function'
-		);
-		if (!juliaSession) {
-			return null;
-		}
-
-		// Use Jupyter complete_request via callMethod — fully silent,
-		// does not pollute console or history.
-		// query is the text up to the cursor, so query.length is the cursor
-		// offset within that text — equivalent to position.character in the
-		// VSCode provider and correct for the Jupyter complete_request protocol.
-		const reply = await juliaSession.callMethod!(
-			'complete_request',
-			query,
-			query.length
+		let stdout = '';
+		await positron.runtime.executeCode(
+			'julia',
+			buildCompletionSnippet(query),
+			false,
+			false,
+			positron.RuntimeCodeExecutionMode.Silent,
+			positron.RuntimeErrorBehavior.Continue,
+			{ onOutput: (msg: string) => { stdout += msg; } }
 		);
 
-		const matches: string[] = Array.isArray(reply?.matches) ? reply.matches : [];
-		const cursor_start: number = typeof reply?.cursor_start === 'number' ? reply.cursor_start : 0;
-		const cursor_end: number = typeof reply?.cursor_end === 'number' ? reply.cursor_end : query.length;
-
-		return { matches, cursor_start, cursor_end };
+		return parseCompletionOutput(stdout, query.length);
 	} catch (err) {
-		LOGGER.debug(`Runtime completion error in getRuntimeCompletions: ${err}`);
+		LOGGER.warn(`Runtime completion error in getRuntimeCompletions: ${err}`);
 		return null;
 	}
 }
-
