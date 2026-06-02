@@ -259,9 +259,11 @@ async function doStartLanguageServer(
 
 			LOGGER.info('Registering repl/getCompletions request handler');
 			const handleGetCompletions = async (params: any): Promise<ReplCompletionResult> => {
-				let paramsStr = '';
-				try { paramsStr = JSON.stringify(params); } catch { paramsStr = '[unstringifiable]'; }
-				LOGGER.debug(`LSP repl completion request received with params: ${paramsStr}`);
+				if (LOGGER.logLevel <= vscode.LogLevel.Debug) {
+					let paramsStr = '';
+					try { paramsStr = JSON.stringify(params); } catch { paramsStr = '[unstringifiable]'; }
+					LOGGER.debug(`LSP repl completion request received with params: ${paramsStr}`);
+				}
 
 				let query = '';
 				if (typeof params === 'string') {
@@ -269,11 +271,15 @@ async function doStartLanguageServer(
 				} else if (params && typeof params === 'object' && !Array.isArray(params)) {
 					// 'prefix' is the canonical field used by LanguageServer.jl;
 					// the remaining keys are fallbacks for other callers.
-					query = params.prefix ?? params.query ?? params.text ?? params.line ?? params.code ?? params.word ?? '';
+					const candidate = params.prefix ?? params.query ?? params.text ?? params.line ?? params.code ?? params.word ?? '';
+					query = typeof candidate === 'string' ? candidate : '';
 				}
-				return await getRuntimeCompletions(query) ?? { matches: [], cursor_start: 0, cursor_end: 0 };
-			};
+				if (!query.trim()) {
+					return { matches: [], cursor_start: 0, cursor_end: 0 };
+				}
+				return await getRuntimeCompletions(query) ?? { matches: [], cursor_start: 0, cursor_end: query.length };
 
+			client.onRequest('repl/getcompletions', handleGetCompletions);
 			client.onRequest('repl/getCompletions', handleGetCompletions);
 		});
 		LOGGER.info('Julia Language Server started successfully');

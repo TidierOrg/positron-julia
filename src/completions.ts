@@ -136,7 +136,7 @@ export interface ReplCompletionResult {
  * Returns null when no session is available or the query is empty.
  */
 export async function getRuntimeCompletions(query: string): Promise<ReplCompletionResult | null> {
-	if (!query) {
+	if (!query || !query.trim()) {
 		return null;
 	}
 
@@ -162,8 +162,8 @@ export async function getRuntimeCompletions(query: string): Promise<ReplCompleti
 		);
 
 		const matches: string[] = Array.isArray(reply?.matches) ? reply.matches : [];
-		const cursor_start: number = reply?.cursor_start ?? 0;
-		const cursor_end: number = reply?.cursor_end ?? query.length;
+		const cursor_start: number = typeof reply?.cursor_start === 'number' ? reply.cursor_start : 0;
+		const cursor_end: number = typeof reply?.cursor_end === 'number' ? reply.cursor_end : query.length;
 
 		return { matches, cursor_start, cursor_end };
 	} catch (err) {
