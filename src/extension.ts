@@ -278,6 +278,7 @@ async function doStartLanguageServer(
 					return { matches: [], cursor_start: 0, cursor_end: 0 };
 				}
 				return await getRuntimeCompletions(query) ?? { matches: [], cursor_start: 0, cursor_end: query.length };
+			};
 
 			client.onRequest('repl/getcompletions', handleGetCompletions);
 			client.onRequest('repl/getCompletions', handleGetCompletions);
