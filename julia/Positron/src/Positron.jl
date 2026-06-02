@@ -46,6 +46,10 @@ include("plots.jl")
 include("data_explorer.jl")
 include("ui.jl")
 
+# Profiler: tree builder + kernel-initiated comm wiring
+include("profile.jl")
+include("profile_comm.jl")
+
 # Main integration
 include("kernel.jl")
 
@@ -59,7 +63,10 @@ export view, showhelp, show_ui_message
 export test_error_logging, test_ui_notification
 
 # Exports - Services (for advanced usage)
-export VariablesService, HelpService, PlotsService, DataExplorerService, UIService
+export VariablesService, HelpService, PlotsService, DataExplorerService, UIService, ProfilerService
+
+# Exports - Profiler macros
+export @profview, @profview_allocs
 
 # Exports - Comm types (for testing)
 export PositronComm, create_comm, on_msg!, on_close!, send_result, send_event, send_error

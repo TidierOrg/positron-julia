@@ -6,13 +6,15 @@
 import * as vscode from "vscode";
 import * as positron from "positron";
 
-import { LOGGER, supervisorApi } from "./extension";
+import { LOGGER, supervisorApi, getProfilerFeature } from "./extension";
 import { JuliaInstallation } from "./julia-installation";
 import {
   JupyterLanguageRuntimeSession,
   JupyterKernelSpec,
 } from "./positron-supervisor";
 import { JuliaPackageManager } from "./packages";
+
+const PROFILE_COMM_TARGET = "positron.profile";
 
 interface RuntimeResourceUsage {
   [key: string]: unknown;
@@ -253,6 +255,7 @@ export class JuliaSession
     this._kernel.onDidReceiveRuntimeMessage(
       (msg: positron.LanguageRuntimeMessage) => {
         this._rawMessageEmitter.fire(msg);
+        this.maybeHandleProfileCommOpen(msg);
         if (!this._suppressedExecutionIds.has(msg.parent_id)) {
           this._messageEmitter.fire(msg);
           // Silent package commands are excluded by _suppressedExecutionIds,
@@ -431,7 +434,43 @@ export class JuliaSession
   }
 
   async showProfile(): Promise<void> {
-    LOGGER.info("Profiler not yet implemented for Julia");
+    await vscode.commands.executeCommand("julia.openProfiler");
+  }
+
+  /**
+   * If the runtime message is a kernel-initiated comm_open for the profile
+   * comm, forward its payload to the global ProfilerFeature so it can render
+   * the trace.
+   */
+  private maybeHandleProfileCommOpen(
+    msg: positron.LanguageRuntimeMessage,
+  ): void {
+    if (msg.type !== positron.LanguageRuntimeMessageType.CommOpen) {
+      return;
+    }
+
+    const commOpen = msg as positron.LanguageRuntimeCommOpen;
+    if (commOpen.target_name !== PROFILE_COMM_TARGET) {
+      return;
+    }
+
+    const data = commOpen.data as { trace?: Record<string, any>; type?: string } | undefined;
+    if (!data || !data.trace) {
+      LOGGER.warn("Profile comm_open received with no trace data");
+      return;
+    }
+
+    const feature = getProfilerFeature();
+    if (!feature) {
+      LOGGER.warn("Profile comm_open received but ProfilerFeature is not registered");
+      return;
+    }
+
+    try {
+      feature.showTrace({ data: data.trace, type: data.type ?? "Thread" });
+    } catch (error) {
+      LOGGER.warn(`Failed to render profile trace: ${error}`);
+    }
   }
 
   openResource(_resource: vscode.Uri | string): Thenable<boolean> {

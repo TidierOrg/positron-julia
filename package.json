@@ -49,6 +49,12 @@
     "onCommand:julia.stopTestController",
     "onCommand:julia.runEditorContents",
     "onCommand:julia.debugEditorContents",
+    "onCommand:julia.openProfiler",
+    "onCommand:julia.nextProfile",
+    "onCommand:julia.previousProfile",
+    "onCommand:julia.deleteProfile",
+    "onCommand:julia.deleteAllProfiles",
+    "onCommand:julia.saveProfileToFile",
     "onDebugInitialConfigurations",
     "onDebugResolve:julia"
   ],
@@ -204,6 +210,40 @@
         "category": "Julia",
         "title": "Debug File in Julia",
         "icon": "$(debug-alt)"
+      },
+      {
+        "command": "julia.openProfiler",
+        "category": "Julia",
+        "title": "Show Profiler"
+      },
+      {
+        "command": "julia.nextProfile",
+        "category": "Julia",
+        "title": "Next Profile",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "julia.previousProfile",
+        "category": "Julia",
+        "title": "Previous Profile",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "julia.deleteProfile",
+        "category": "Julia",
+        "title": "Delete Profile",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "julia.deleteAllProfiles",
+        "category": "Julia",
+        "title": "Delete All Profiles"
+      },
+      {
+        "command": "julia.saveProfileToFile",
+        "category": "Julia",
+        "title": "Save Profile",
+        "icon": "$(save)"
       }
     ],
     "debuggers": [
@@ -497,6 +537,28 @@
           "when": "!virtualWorkspace"
         }
       ],
+      "editor/title": [
+        {
+          "when": "julia.profilerFocus",
+          "command": "julia.previousProfile",
+          "group": "navigation@-3"
+        },
+        {
+          "when": "julia.profilerFocus",
+          "command": "julia.nextProfile",
+          "group": "navigation@-2"
+        },
+        {
+          "when": "julia.profilerFocus",
+          "command": "julia.deleteProfile",
+          "group": "navigation@0"
+        },
+        {
+          "when": "julia.profilerFocus",
+          "command": "julia.saveProfileToFile",
+          "group": "navigation@1"
+        }
+      ],
       "editor/title/run": [
         {
           "when": "resourceExtname == .jl || editorLangId == julia",
@@ -530,7 +592,39 @@
         "editor.tabSize": 4,
         "editor.insertSpaces": true
       }
-    }
+    },
+    "colors": [
+      {
+        "id": "julia.profiler.dispatch",
+        "description": "Inline profiler color for traces with dynamic dispatch.",
+        "defaults": {
+          "dark": "#cc676732",
+          "light": "#cc676732",
+          "highContrast": "#cc676732",
+          "highContrastLight": "#cc676732"
+        }
+      },
+      {
+        "id": "julia.profiler.gc",
+        "description": "Inline profiler color for traces with GC events/allocations.",
+        "defaults": {
+          "dark": "#cc994432",
+          "light": "#cc994432",
+          "highContrast": "#cc994432",
+          "highContrastLight": "#cc994432"
+        }
+      },
+      {
+        "id": "julia.profiler.default",
+        "description": "Default inline profiler color.",
+        "defaults": {
+          "dark": "#4063dd32",
+          "light": "#4063dd32",
+          "highContrast": "#4063dd32",
+          "highContrastLight": "#4063dd32"
+        }
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

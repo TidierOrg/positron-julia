@@ -20,6 +20,7 @@ import { JuliaEnvironmentManager } from './environment';
 import { TestFeature } from './testing/testFeature';
 import { notifyTypeTextDocumentPublishTests } from './testing/testLSProtocol';
 import { registerDebugFeature } from './debugger/debugFeature';
+import { ProfilerFeature } from './profiler';
 
 export const LOGGER = vscode.window.createOutputChannel('Julia Language Pack', { log: true });
 
@@ -28,6 +29,11 @@ let languageServerStarting: Promise<void> | undefined;
 let _context: vscode.ExtensionContext | undefined;
 let _testFeature: import('./testing/testFeature').TestFeature | undefined;
 let _getJuliaSession: () => import('./session').JuliaSession | undefined = () => undefined;
+let _profilerFeature: ProfilerFeature | undefined;
+
+export function getProfilerFeature(): ProfilerFeature | undefined {
+	return _profilerFeature;
+}
 
 export function getLanguageClient(): JuliaLanguageClient | undefined {
 	return languageClient;
@@ -105,6 +111,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Debug Adapter Protocol — breakpoints, step-through, variable inspection
 	registerDebugFeature(context, juliaRuntimeManager);
+
+	// Profiler webview and inline trace decorations
+	_profilerFeature = new ProfilerFeature(context);
+	context.subscriptions.push(_profilerFeature);
 
 	// Test Explorer — discovers @testitem blocks via the LS and runs them via a Julia subprocess
 	_testFeature = new TestFeature(

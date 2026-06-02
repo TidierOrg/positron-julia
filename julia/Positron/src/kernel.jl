@@ -97,6 +97,7 @@ mutable struct PositronKernel
     plots::PlotsService
     data_explorer::DataExplorerService
     ui::UIService
+    profiler::ProfilerService
 
     # Registered comms by target name
     comms::Dict{String,PositronComm}
@@ -111,6 +112,7 @@ mutable struct PositronKernel
             PlotsService(),
             DataExplorerService(),
             UIService(),
+            ProfilerService(),
             Dict{String,PositronComm}(),
             false,
         )
@@ -159,6 +161,9 @@ function start_services!(kernel::PositronKernel = get_kernel())
     # Initialize plots service immediately (uses kernel-initiated comms like Python)
     # The PositronDisplay will be installed to capture plots from Julia's display system
     init!(kernel.plots)
+
+    # Initialize the profiler service (uses kernel-initiated comms per trace)
+    init!(kernel.profiler)
 
     # Set up execution hooks
     setup_execution_hooks!(kernel)
