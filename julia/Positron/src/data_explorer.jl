@@ -592,6 +592,7 @@ end
 Convert Julia type to display type.
 """
 function julia_type_to_display_type(T::Type)::ColumnDisplayType
+    T = nonmissingtype(T)
     if T <: Bool
         return ColumnDisplayType_Boolean
     elseif T <: AbstractString
@@ -843,7 +844,7 @@ function apply_row_filters(
 
     for filter in filters
         filter_mask = apply_single_row_filter(data, filter)
-        if filter.condition == "and"
+        if filter.condition == RowFilterCondition_And
             mask .&= filter_mask
         else  # "or"
             mask .|= filter_mask
@@ -893,17 +894,17 @@ function apply_single_row_filter(data::Any, filter::RowFilter)::BitVector
         compare_val = tryparse(Float64, filter.params.value)
         if compare_val !== nothing
             # Vectorized numeric comparison
-            if filter.params.op == "="
+            if filter.params.op == FilterComparisonOp_Eq
                 return col .== compare_val
-            elseif filter.params.op == "!="
+            elseif filter.params.op == FilterComparisonOp_NotEq
                 return col .!= compare_val
-            elseif filter.params.op == "<"
+            elseif filter.params.op == FilterComparisonOp_Lt
                 return col .< compare_val
-            elseif filter.params.op == "<="
+            elseif filter.params.op == FilterComparisonOp_LtEq
                 return col .<= compare_val
-            elseif filter.params.op == ">"
+            elseif filter.params.op == FilterComparisonOp_Gt
                 return col .> compare_val
-            elseif filter.params.op == ">="
+            elseif filter.params.op == FilterComparisonOp_GtEq
                 return col .>= compare_val
             end
         end
@@ -983,7 +984,7 @@ end
 """
 Apply comparison filter.
 """
-function apply_comparison(val::Any, op::String, compare_val::String)::Bool
+function apply_comparison(val::Any, op::FilterComparisonOp, compare_val::String)::Bool
     if val === nothing || val === missing
         return false
     end
@@ -996,17 +997,17 @@ function apply_comparison(val::Any, op::String, compare_val::String)::Bool
             compare = compare_val
         end
 
-        if op == "="
+        if op == FilterComparisonOp_Eq
             return val == compare
-        elseif op == "!="
+        elseif op == FilterComparisonOp_NotEq
             return val != compare
-        elseif op == "<"
+        elseif op == FilterComparisonOp_Lt
             return val < compare
-        elseif op == "<="
+        elseif op == FilterComparisonOp_LtEq
             return val <= compare
-        elseif op == ">"
+        elseif op == FilterComparisonOp_Gt
             return val > compare
-        elseif op == ">="
+        elseif op == FilterComparisonOp_GtEq
             return val >= compare
         end
     catch
@@ -1529,90 +1530,131 @@ function format_code_val(val::String, type_display::ColumnDisplayType)::String
     return "\"$escaped\""
 end
 
+# Returns true if name can be used as a bare Julia identifier (not a keyword).
+function is_safe_identifier(name::String)::Bool
+    return Base.isidentifier(name) && !Base.iskeyword(name)
+end
+
+# Returns a TidierData-safe column reference: bare name or var"..." for non-identifiers.
+function tidier_col_ref(name::String)::String
+    if is_safe_identifier(name)
+        return name
+    else
+        return "var\"$(escape_string(name))\""
+    end
+end
+
+# Returns a DataFrames-safe column selector: :name or Symbol("name") for non-identifiers.
+function df_col_selector(name::String)::String
+    if is_safe_identifier(name)
+        return ":$name"
+    else
+        return "Symbol(\"$(escape_string(name))\")"
+    end
+end
+
+# Returns a safe Julia variable name for a DataFrames lambda argument.
+function safe_var_name(name::String, idx::Int)::String
+    if is_safe_identifier(name)
+        return name
+    else
+        return "_col$idx"
+    end
+end
+
 """
-Convert a RowFilter to a TidierData condition string.
+Convert a RowFilter to a condition string, using col_ref as the identifier for the column value.
 """
-function to_tidier_cond(f::RowFilter)::String
-    col = f.column_schema.column_name
+function to_code_cond(f::RowFilter, col_ref::String)::String
     type_display = f.column_schema.type_display
     
     if f.filter_type == RowFilterType_IsNull
-        return "ismissing($col)"
+        return "ismissing($col_ref)"
     elseif f.filter_type == RowFilterType_NotNull
-        return "!ismissing($col)"
+        return "!ismissing($col_ref)"
     elseif f.filter_type == RowFilterType_IsEmpty
-        return "ismissing($col) || $col == \"\""
+        return "ismissing($col_ref) || $col_ref == \"\""
     elseif f.filter_type == RowFilterType_NotEmpty
-        return "!ismissing($col) && $col != \"\""
+        return "!ismissing($col_ref) && $col_ref != \"\""
     elseif f.filter_type == RowFilterType_IsTrue
-        return "$col == true"
+        return "$col_ref == true"
     elseif f.filter_type == RowFilterType_IsFalse
-        return "$col == false"
+        return "$col_ref == false"
     end
-    
+
     params = f.params
     if params === nothing
         return "true"
     end
-    
+
     if params isa FilterComparison
-        # Map op
         op_str = string(params.op)
         if op_str == "="
             op_str = "=="
         end
         val_str = format_code_val(params.value, type_display)
-        return "$col $op_str $val_str"
+        return "$col_ref $op_str $val_str"
     elseif params isa FilterBetween
         left = format_code_val(params.left_value, type_display)
         right = format_code_val(params.right_value, type_display)
         if f.filter_type == RowFilterType_NotBetween
-            return "$col < $left || $col > $right"
+            return "$col_ref < $left || $col_ref > $right"
         else
-            return "$col >= $left && $col <= $right"
+            return "$col_ref >= $left && $col_ref <= $right"
         end
     elseif params isa FilterTextSearch
         term_escaped = escape_string(params.term)
         term_str = "\"$term_escaped\""
+        # Guard missing values; stringify so the filter works on non-string columns,
+        # matching the runtime's string(val) conversion.
+        guard = "!ismissing($col_ref)"
+        str_ref = "string($col_ref)"
         if params.search_type == TextSearchType_Contains
             if params.case_sensitive
-                return "occursin($term_str, $col)"
+                return "$guard && occursin($term_str, $str_ref)"
             else
-                return "occursin(lowercase($term_str), lowercase($col))"
+                return "$guard && occursin(lowercase($term_str), lowercase($str_ref))"
             end
         elseif params.search_type == TextSearchType_NotContains
             if params.case_sensitive
-                return "!occursin($term_str, $col)"
+                return "$guard && !occursin($term_str, $str_ref)"
             else
-                return "!occursin(lowercase($term_str), lowercase($col))"
+                return "$guard && !occursin(lowercase($term_str), lowercase($str_ref))"
             end
         elseif params.search_type == TextSearchType_StartsWith
             if params.case_sensitive
-                return "startswith($col, $term_str)"
+                return "$guard && startswith($str_ref, $term_str)"
             else
-                return "startswith(lowercase($col), lowercase($term_str))"
+                return "$guard && startswith(lowercase($str_ref), lowercase($term_str))"
             end
         elseif params.search_type == TextSearchType_EndsWith
             if params.case_sensitive
-                return "endswith($col, $term_str)"
+                return "$guard && endswith($str_ref, $term_str)"
             else
-                return "endswith(lowercase($col), lowercase($term_str))"
+                return "$guard && endswith(lowercase($str_ref), lowercase($term_str))"
             end
         elseif params.search_type == TextSearchType_RegexMatch
             flags = params.case_sensitive ? "" : "i"
-            return "occursin(Regex($term_str, \"$flags\"), $col)"
+            return "$guard && occursin(Regex($term_str, \"$flags\"), $str_ref)"
         end
     elseif params isa FilterSetMembership
         items = [format_code_val(v, type_display) for v in params.values]
         items_str = "[" * join(items, ", ") * "]"
         if params.inclusive
-            return "$col in $items_str"
+            return "$col_ref in $items_str"
         else
-            return "!($col in $items_str)"
+            return "!($col_ref in $items_str)"
         end
     end
-    
+
     return "true"
+end
+
+"""
+Convert a RowFilter to a TidierData condition string.
+"""
+function to_tidier_cond(f::RowFilter)::String
+    return to_code_cond(f, tidier_col_ref(f.column_schema.column_name))
 end
 
 """
@@ -1655,20 +1697,21 @@ function convert_to_code_tidier(
             end
         end
         if length(matched_cols) < ncols
-            select_args = join(matched_cols, ", ")
+            select_args = join([tidier_col_ref(c) for c in matched_cols], ", ")
             push!(chain_parts, "    @select($select_args)")
         end
     end
-    
+
     # 3. Sort Keys
     if !isempty(request.sort_keys)
         arrange_args = String[]
         for key in request.sort_keys
             col_name = get_column_name(data, key.column_index + 1)
+            ref = tidier_col_ref(col_name)
             if key.ascending
-                push!(arrange_args, col_name)
+                push!(arrange_args, ref)
             else
-                push!(arrange_args, "desc($col_name)")
+                push!(arrange_args, "desc($ref)")
             end
         end
         arrange_str = join(arrange_args, ", ")
@@ -1704,15 +1747,19 @@ function convert_to_code_dataframes(
     
     # 1. Row Filters
     if !isempty(request.row_filters)
-        cols_needed = unique([Symbol(f.column_schema.column_name) for f in request.row_filters])
-        cols_arg = length(cols_needed) == 1 ? ":$(cols_needed[1])" : "[" * join([":$c" for c in cols_needed], ", ") * "]"
-        lambda_args = join([string(c) for c in cols_needed], ", ")
-        if length(cols_needed) > 1
-            lambda_args = "($lambda_args)"
+        col_names_needed = unique([f.column_schema.column_name for f in request.row_filters])
+        # Map each column name to a safe lambda argument name
+        col_to_arg = Dict(name => safe_var_name(name, i) for (i, name) in enumerate(col_names_needed))
+        cols_arg = if length(col_names_needed) == 1
+            df_col_selector(col_names_needed[1])
+        else
+            "[" * join([df_col_selector(c) for c in col_names_needed], ", ") * "]"
         end
+        arg_names = [col_to_arg[name] for name in col_names_needed]
+        lambda_args = length(arg_names) == 1 ? arg_names[1] : "(" * join(arg_names, ", ") * ")"
         filter_expr = ""
         for (i, f) in enumerate(request.row_filters)
-            cond = to_tidier_cond(f)
+            cond = to_code_cond(f, col_to_arg[f.column_schema.column_name])
             if i == 1
                 filter_expr = cond
             else
@@ -1720,9 +1767,10 @@ function convert_to_code_dataframes(
                 filter_expr = "$filter_expr $op $cond"
             end
         end
-        push!(pipe_parts, "    x -> subset(x, $cols_arg => ByRow($lambda_args -> $filter_expr))")
+        # skipmissing=true matches the Data Explorer behavior of treating missing as non-match
+        push!(pipe_parts, "    x -> subset(x, $cols_arg => ByRow($lambda_args -> $filter_expr), skipmissing=true)")
     end
-    
+
     # 2. Column Selections (using column_filters)
     if !isempty(request.column_filters)
         ncols = get_num_columns(data)
@@ -1734,18 +1782,18 @@ function convert_to_code_dataframes(
             end
         end
         if length(matched_cols) < ncols
-            select_args = "[" * join([":$c" for c in matched_cols], ", ") * "]"
+            select_args = "[" * join([df_col_selector(c) for c in matched_cols], ", ") * "]"
             push!(pipe_parts, "    x -> select(x, $select_args)")
         end
     end
-    
+
     # 3. Sort Keys
     if !isempty(request.sort_keys)
         sort_cols = String[]
         sort_revs = String[]
         for key in request.sort_keys
             col_name = get_column_name(data, key.column_index + 1)
-            push!(sort_cols, ":$col_name")
+            push!(sort_cols, df_col_selector(col_name))
             push!(sort_revs, string(!key.ascending))
         end
         cols_arg = length(sort_cols) == 1 ? sort_cols[1] : "[" * join(sort_cols, ", ") * "]"
