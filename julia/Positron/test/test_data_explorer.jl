@@ -2237,7 +2237,7 @@ end
         
         code_df = Positron.convert_to_code(df, "my_df", request_df)
         @test "using DataFrames" in code_df
-        @test any(occursin("subset(x, :age => ByRow(age -> age > 21))", line) for line in code_df)
+        @test any(occursin("subset(x, :age => ByRow(age -> age > 21), skipmissing=true)", line) for line in code_df)
         @test any(occursin("sort(x, :score, rev=true)", line) for line in code_df)
         @test any(occursin("result = my_df |>", line) for line in code_df)
     end
