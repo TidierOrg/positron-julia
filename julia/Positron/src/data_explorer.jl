@@ -592,7 +592,7 @@ end
 Convert Julia type to display type.
 """
 function julia_type_to_display_type(T::Type)::ColumnDisplayType
-    T = nonmissingtype(T)
+    T = Base.nonmissingtype(T)
     if T <: Bool
         return ColumnDisplayType_Boolean
     elseif T <: AbstractString
@@ -1532,7 +1532,18 @@ end
 
 # Returns true if name can be used as a bare Julia identifier (not a keyword).
 function is_safe_identifier(name::String)::Bool
-    return Base.isidentifier(name) && !Base.iskeyword(name)
+    if !Base.isidentifier(name)
+        return false
+    end
+    # Base.isidentifier accepts reserved words ("function", "end", "true", ...),
+    # which cannot be used as bare identifiers. Reject anything that does not
+    # round-trip through the parser as a plain Symbol.
+    parsed = try
+        Meta.parse(name)
+    catch
+        return false
+    end
+    return parsed isa Symbol && string(parsed) == name
 end
 
 # Returns a TidierData-safe column reference: bare name or var"..." for non-identifiers.
