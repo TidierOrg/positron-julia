@@ -1,6 +1,8 @@
 /*---------------------------------------------------------------------------------------------
- *  Copyright (C) 2024-2025 Posit Software, PBC. All rights reserved.
- *  Licensed under the Elastic License 2.0. See LICENSE.txt for license information.
+ *  Adapted from julia-vscode (https://github.com/julia-vscode/julia-vscode), whose
+ *  VSCodeDebugger.jl debug adapter this feature drives.
+ *  Copyright (c) 2012-2025 julia-vscode contributors.
+ *  Licensed under the MIT License. See LICENSE-MIT for license information.
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
