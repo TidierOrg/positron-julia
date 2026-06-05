@@ -52,4 +52,55 @@ On first launch, the extension automatically installs required Julia packages (`
 
 ## License
 
-Elastic License 2.0 — see [LICENSE](LICENSE).
+This project is dual-licensed, reflecting its two main sources of code:
+
+- **Elastic License 2.0** — the Positron integration code originating from
+  Posit Software, PBC (the Julia runtime, session, language client, completions,
+  provider, and the `julia/Positron/` Julia package, plus code written for this
+  extension that follows those Positron patterns). See [LICENSE](LICENSE). These
+  files carry a `Copyright (C) Posit Software, PBC … Elastic License 2.0` header.
+
+- **MIT License** — the code derived from
+  [julia-vscode](https://github.com/julia-vscode/julia-vscode) and
+  [Julia.tmbundle](https://github.com/JuliaLang/Julia.tmbundle). See
+  [LICENSE-MIT](LICENSE-MIT). These files carry a `Ported/Adapted from
+  julia-vscode … MIT License` header. They include:
+  - `src/testing/testControllerProtocol.ts`, `src/testing/testLSProtocol.ts`,
+    `src/testing/testFeature.ts`
+  - `src/debugger/debugFeature.ts`
+  - `scripts/debugger/run_debugger.jl`,
+    `scripts/apps/testitemcontroller_main.jl`, and the bundled
+    `scripts/environments/testitemcontroller/` project files
+  - `syntaxes/julia_vscode.json`, `syntaxes/juliacodeblock.json`,
+    `syntaxes/juliamarkdown.json`, and
+    `language-configuration/julia-language-configuration.json` (these are strict
+    JSON and so carry no inline header; they are MIT-licensed by virtue of being
+    listed here)
+
+### The MIT License (MIT)
+
+```
+Copyright (c) 2012-2025 David Anthoff, Zac Nugent, Sebastian Pfitzner and
+other contributors:
+
+https://github.com/JuliaLang/Julia.tmbundle/contributors
+https://github.com/julia-vscode/julia-vscode/contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

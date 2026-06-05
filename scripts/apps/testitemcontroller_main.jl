@@ -1,3 +1,7 @@
+# Ported from julia-vscode (https://github.com/julia-vscode/julia-vscode).
+# Copyright (c) 2012-2025 julia-vscode contributors.
+# Licensed under the MIT License. See LICENSE-MIT for license information.
+
 if VERSION < v"1.10.0"
     error("Julia test item controller requires Julia 1.10.0 or newer")
 end
