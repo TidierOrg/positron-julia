@@ -19,6 +19,7 @@ REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 StructTypes = "856f2bd8-1eba-4b0a-8007-ebc267875bd4"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 

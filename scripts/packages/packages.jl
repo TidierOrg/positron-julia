@@ -7,19 +7,21 @@ import Pkg
 import TOML
 
 const _PositronPackage = NamedTuple{
-    (:id, :name, :displayName, :version, :attached, :description),
-    Tuple{String, String, String, String, Bool, String},
+    (:id, :name, :displayName, :version, :attached, :description, :url),
+    Tuple{String, String, String, String, Bool, String, String},
 }
 """
 Canonical ordered list of metadata fields for JSON serialization.
 """
 # Keep deterministic field order in JSON output.
-const _POSITRON_METADATA_FIELDS = ("latestVersion", "license", "description")
+const _POSITRON_METADATA_FIELDS = ("latestVersion", "license", "description", "url")
 """
 Map of package name to its metadata field dictionary.
 """
 const _MetadataByName = Dict{String, Dict{String, String}}
+const _POSITRON_PROJECT_METADATA_BY_PATH = Dict{String, Tuple{String, String, String}}()
 const _POSITRON_DESCRIPTION_BY_PATH = Dict{String, String}()
+const _POSITRON_REGISTRY_URL_BY_NAME = Dict{String, String}()
 
 function _positron_json_string(value::AbstractString)::String
     return "\"" * escape_string(value) * "\""
@@ -30,6 +32,15 @@ Safely convert a value to a String, or return an empty string for non-strings.
 """
 function _positron_string_or_empty(value)
     return value isa AbstractString ? String(value) : ""
+end
+
+function _positron_first_string_field(parsed, keys)::String
+    for key in keys
+        value = _positron_string_or_empty(get(parsed, key, ""))
+        value = strip(value)
+        isempty(value) || return value
+    end
+    return ""
 end
 
 function _positron_collapse_whitespace(value::AbstractString)::String
@@ -135,39 +146,63 @@ function _positron_print_json_packages(packages)
         if !isempty(package.description)
             print(",\"description\":", _positron_json_string(package.description))
         end
+        if !isempty(package.url)
+            print(",\"url\":", _positron_json_string(package.url))
+        end
         print("}")
     end
     print("]")
 end
 
 """
-Read description and license fields from a package's Project.toml/JuliaProject.toml.
-Returns (description, license) as strings (empty when unavailable).
+Read description, license, and URL fields from a package's Project.toml/JuliaProject.toml.
+Returns (description, license, url) as strings (empty when unavailable).
 """
 function _positron_read_project_metadata(package_path::AbstractString)
-    for filename in ("Project.toml", "JuliaProject.toml")
-        project_path = joinpath(package_path, filename)
-        isfile(project_path) || continue
-        parsed = try
-            TOML.parsefile(project_path)
-        catch err
-            @debug "Failed to parse package metadata TOML" path=project_path exception=err
-            continue
+    return get!(_POSITRON_PROJECT_METADATA_BY_PATH, String(package_path)) do
+        for filename in ("Project.toml", "JuliaProject.toml")
+            project_path = joinpath(package_path, filename)
+            isfile(project_path) || continue
+            parsed = try
+                TOML.parsefile(project_path)
+            catch err
+                @debug "Failed to parse package metadata TOML" path=project_path exception=err
+                continue
+            end
+            description = _positron_string_or_empty(get(parsed, "description", ""))
+            license = _positron_string_or_empty(get(parsed, "license", ""))
+            url = _positron_first_string_field(parsed, (
+                "homepage",
+                "home",
+                "website",
+                "url",
+                "repository",
+                "repo",
+                "source",
+                "documentation",
+                "docs",
+                "doc",
+            ))
+            return description, license, url
         end
-        description = _positron_string_or_empty(get(parsed, "description", ""))
-        license = _positron_string_or_empty(get(parsed, "license", ""))
-        return description, license
+        return "", "", ""
     end
-    return "", ""
 end
 
 function _positron_read_package_description(package_path)
     package_path isa AbstractString || return ""
     isempty(package_path) && return ""
     return get!(_POSITRON_DESCRIPTION_BY_PATH, package_path) do
-        description, _ = _positron_read_project_metadata(package_path)
+        description, _, _ = _positron_read_project_metadata(package_path)
         isempty(description) ? _positron_read_readme_description(package_path) : description
     end
+end
+
+function _positron_read_project_url(package_path)
+    package_path isa AbstractString || return ""
+    isempty(package_path) && return ""
+    _, _, url = _positron_read_project_metadata(package_path)
+    return url
 end
 
 function _positron_package_source_path(package_info)::String
@@ -179,6 +214,49 @@ function _positron_package_source_path(package_info)::String
         end
     end
     return ""
+end
+
+function _positron_package_source_url(package_info)::String
+    hasproperty(package_info, :git_source) || return ""
+    value = getproperty(package_info, :git_source)
+    return value isa AbstractString ? String(value) : ""
+end
+
+function _positron_registry_entry_url(entry)::String
+    info = try
+        Pkg.Registry.registry_info(entry)
+    catch
+        return ""
+    end
+    isdefined(info, :repo) || return ""
+    return _positron_string_or_empty(getproperty(info, :repo))
+end
+
+function _positron_registry_package_url(package_name::AbstractString)::String
+    target = lowercase(strip(String(package_name)))
+    isempty(target) && return ""
+
+    return get!(_POSITRON_REGISTRY_URL_BY_NAME, target) do
+        for registry in Pkg.Registry.reachable_registries()
+            for entry in values(registry.pkgs)
+                lowercase(entry.name) == target || continue
+                url = _positron_registry_entry_url(entry)
+                isempty(url) || return url
+            end
+        end
+        return ""
+    end
+end
+
+function _positron_package_url(package_info)::String
+    package_path = _positron_package_source_path(package_info)
+    url = _positron_read_project_url(package_path)
+    isempty(url) || return url
+
+    url = _positron_package_source_url(package_info)
+    isempty(url) || return url
+
+    return _positron_registry_package_url(package_info.name)
 end
 
 function _positron_explicitly_loaded_names()
@@ -218,6 +296,7 @@ function _positron_list_packages(direct_only::Bool=true)
         name = package_info.name
         version = string(package_info.version)
         description = _positron_read_package_description(_positron_package_source_path(package_info))
+        url = _positron_package_url(package_info)
         push!(packages, (
             id = "$(name)-$(version)",
             name = name,
@@ -225,6 +304,7 @@ function _positron_list_packages(direct_only::Bool=true)
             version = version,
             attached = name in explicitly_loaded,
             description = description,
+            url = url,
         ))
     end
     sort!(packages, by = package -> lowercase(package.name))
@@ -278,6 +358,7 @@ function _positron_search_packages(query::String)
     end
 
     by_name = Dict{String, String}()
+    by_url = Dict{String, String}()
 
     for registry in Pkg.Registry.reachable_registries()
         for entry in values(registry.pkgs)
@@ -302,6 +383,15 @@ function _positron_search_packages(query::String)
                     # Keep the existing version if parsing fails.
                 end
             end
+
+            url = get(by_url, package_name, "")
+            if isempty(url)
+                url = _positron_registry_entry_url(entry)
+                if !isempty(url)
+                    by_url[package_name] = url
+                    _POSITRON_REGISTRY_URL_BY_NAME[lowercase(package_name)] = url
+                end
+            end
         end
     end
 
@@ -314,6 +404,7 @@ function _positron_search_packages(query::String)
             version = version,
             attached = false,
             description = "",
+            url = get(by_url, name, ""),
         ))
     end
     sort!(packages, by = package -> lowercase(package.name))
@@ -378,6 +469,12 @@ function _positron_package_metadata(names::Vector{String})
                     # Keep the existing version if parsing fails.
                 end
             end
+
+            url = _positron_registry_entry_url(entry)
+            if !isempty(url)
+                fields["url"] = url
+                _POSITRON_REGISTRY_URL_BY_NAME[lowercase(entry.name)] = url
+            end
         end
     end
 
@@ -386,12 +483,15 @@ function _positron_package_metadata(names::Vector{String})
         lowercase(package_name) in targets || continue
         package_path = _positron_package_source_path(package_info)
         if !isempty(package_path)
-            description, license = _positron_read_project_metadata(package_path)
+            description, license, url = _positron_read_project_metadata(package_path)
             isempty(description) && (description = _positron_read_package_description(package_path))
-            if !isempty(description) || !isempty(license)
+            isempty(url) && (url = _positron_package_source_url(package_info))
+            isempty(url) && (url = _positron_registry_package_url(package_name))
+            if !isempty(description) || !isempty(license) || !isempty(url)
                 fields = get!(by_name, package_name, Dict{String,String}())
                 isempty(description) || (fields["description"] = description)
                 isempty(license) || (fields["license"] = license)
+                isempty(url) || (fields["url"] = url)
             end
         end
     end

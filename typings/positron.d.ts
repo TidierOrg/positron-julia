@@ -1259,6 +1259,8 @@ declare module 'positron' {
 		attached?: boolean;
 		/** Optional short description or summary shown in the Packages pane card view. */
 		description?: string;
+		/** Optional package website, repository, or documentation URL. */
+		url?: string;
 	}
 
 	/**

@@ -430,6 +430,10 @@ export class JuliaPackageManager
             record.description.length > 0
               ? record.description
               : undefined,
+          url:
+            typeof record.url === "string" && record.url.length > 0
+              ? record.url
+              : undefined,
         };
       })
       .filter((pkg) => pkg.name.length > 0);
@@ -484,6 +488,9 @@ export class JuliaPackageManager
         record.description.length > 0
       ) {
         partial.description = record.description;
+      }
+      if (typeof record.url === "string" && record.url.length > 0) {
+        partial.url = record.url;
       }
 
       result.set(normalizeJuliaPackageName(key), partial);
