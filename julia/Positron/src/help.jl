@@ -71,15 +71,22 @@ function is_installed_help_package(name::AbstractString)::Bool
     end
 end
 
-function maybe_import_unimported_help_package(name::AbstractString)::Bool
-    should_import_unimported_help_packages() || return false
-    is_installed_help_package(name) || return false
+function maybe_import_unimported_help_package(name::AbstractString)::Union{Module, Nothing}
+    should_import_unimported_help_packages() || return nothing
+    is_installed_help_package(name) || return nothing
 
+    sym = Symbol(name)
     try
-        @eval Main import $(Symbol(name))
-        return true
+        # Import into a throw-away module so Main is never polluted.
+        # The package is loaded into Julia's module cache as normal, but the
+        # binding in Main is never created, so the Package Pane does not flip
+        # the package to "attached".
+        m = Module()
+        Core.eval(m, :(import $(sym)))
+        isdefined(m, sym) || return nothing
+        return m
     catch
-        return false
+        return nothing
     end
 end
 
@@ -222,11 +229,15 @@ function resolve_symbol(topic::String)
         # Start from Main
         current = Main
 
-        # Optionally import installed packages so Help can resolve package docs
-        # before the user has imported the package into Main.
+        # Optionally load installed packages into a temp module so Help can
+        # resolve docs before the user has imported the package into Main.
+        # We use a throw-away module so Main is never mutated.
         first_sym = Symbol(parts[1])
         if !isdefined(Main, first_sym)
-            maybe_import_unimported_help_package(parts[1])
+            temp = maybe_import_unimported_help_package(parts[1])
+            if temp !== nothing
+                current = temp
+            end
         end
 
         for (i, part) in enumerate(parts)

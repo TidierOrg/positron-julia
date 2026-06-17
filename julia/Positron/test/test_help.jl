@@ -117,7 +117,7 @@ using JSON3
             sym = Positron.resolve_symbol(package_name)
             @test sym !== nothing
             @test sym isa Module
-            @test isdefined(Main, package_sym)
+            @test !isdefined(Main, package_sym)  # Main must not be polluted
         finally
             if old_setting === nothing
                 delete!(ENV, Positron.HELP_IMPORT_UNIMPORTED_PACKAGES_ENV)

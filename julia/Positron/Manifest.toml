@@ -1144,7 +1144,7 @@ uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
 version = "1.4.3"
 
 [[deps.Positron]]
-deps = ["Base64", "Coverage", "DataFrames", "Dates", "IJulia", "JSON3", "Logging", "Makie", "Markdown", "Pkg", "PrecompileTools", "REPL", "Sockets", "Statistics", "StructTypes", "TOML", "UUIDs", "WGLMakie"]
+deps = ["Base64", "DataFrames", "Dates", "IJulia", "JSON3", "Logging", "Markdown", "Pkg", "PrecompileTools", "REPL", "Sockets", "Statistics", "StructTypes", "TOML", "UUIDs"]
 path = "."
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 version = "0.1.0"
