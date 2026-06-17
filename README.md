@@ -17,7 +17,7 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 - **Runtime Completions** — Supplements LSP completions with live variables and functions from the running Julia session via the Jupyter `complete_request` protocol.
 - **Run Multiline Statements** — Press `Ctrl+Enter` / `Cmd+Enter` to send the full multiline statement at the cursor (functions, loops, blocks) to the console. Handles `function…end`, `if…end`, unclosed brackets, pipe chains, and more.
 - **Semantic Highlighting** — Enhanced syntax highlighting with semantic information from the Language Server for accurate color coding of functions, types, modules, and other language constructs.
-- **Data Explorer** — Open DataFrames, matrices, and other tabular data in Positron's interactive Data Explorer with sorting, filtering, and summary statistics.
+- **Data Explorer** — Open DataFrames, matrices, and other tabular data in Positron's interactive Data Explorer with sorting, filtering, and summary statistics. Convert the current state of the Data Explorer into to Code
 - **Variables Pane** — Browse all session variables with type and value summaries.
 - **Help Integration** — View Julia documentation inline via Positron's Help pane.
 - **Plots** — Julia plots are captured and displayed in Positron's Plots pane.
