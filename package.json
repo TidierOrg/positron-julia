@@ -2,7 +2,7 @@
   "name": "positron-julia",
   "displayName": "Julia for Positron",
   "description": "Julia language support for Positron IDE",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "ntluong95",
   "author": "TidierOrg, rdboyes, ntluong95",
   "contributors": [
@@ -533,26 +533,28 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle",
+    "bundle": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --external:positron --format=cjs --platform=node --minify",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
     "package": "vsce package",
     "test:julia": "julia --project=./julia/Positron -e \"using Pkg; Pkg.test()\"",
-    "verify": "npm run compile && npm run package"
+    "verify": "npm run bundle && npm run package"
   },
   "devDependencies": {
-    "@types/node": "14.x",
     "@types/glob": "^7.2.0",
+    "@types/node": "14.x",
     "@typescript-eslint/eslint-plugin": "^5.12.1",
     "@typescript-eslint/parser": "^5.12.1",
+    "@vscode/vsce": "^3.3.2",
+    "esbuild": "^0.28.1",
     "eslint": "^8.9.0",
-    "typescript": "^4.5.5",
-    "@vscode/vsce": "^3.3.2"
+    "typescript": "^4.5.5"
   },
   "dependencies": {
-    "which": "^3.0.0",
     "semver": "^7.6.3",
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^9.0.1",
+    "which": "^3.0.0"
   }
 }
