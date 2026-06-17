@@ -45,8 +45,10 @@ export class JuliaPackageManager
     Promise<string | undefined>
   >();
 
-  private readonly _onDidChangePackages = new vscode.EventEmitter<void>();
-  readonly onDidChangePackages: vscode.Event<void> =
+  private readonly _onDidChangePackages = new vscode.EventEmitter<
+    void | string[]
+  >();
+  readonly onDidChangePackages: vscode.Event<void | string[]> =
     this._onDidChangePackages.event;
 
   private _notifyThrottleHandle: NodeJS.Timeout | undefined;
@@ -97,8 +99,8 @@ export class JuliaPackageManager
     }
   }
 
-  private _firePackagesChanged(): void {
-    this._onDidChangePackages.fire();
+  private _firePackagesChanged(packageNames?: string[]): void {
+    this._onDidChangePackages.fire(packageNames);
 
     // Trigger the packages pane refresh directly via command. This is
     // needed because Positron's packages pane only auto-refreshes on
@@ -146,14 +148,7 @@ export class JuliaPackageManager
   ): Promise<positron.LanguageRuntimePackage[]> {
     await this.sourcePackagesScript();
 
-    const raw = await this._executeAndCapture(
-      "_positron_list_packages()",
-      positron.RuntimeCodeExecutionMode.Silent,
-      QUERY_TIMEOUT_MS,
-      token,
-    );
-
-    const packages = this._parsePackages(raw);
+    const packages = await this._listPackagesFromRuntime(token);
 
     // Important: the packages pane uses this method, not only getPackageMetadata().
     // Therefore, fetch and replace descriptions here too.
@@ -167,13 +162,15 @@ export class JuliaPackageManager
     token?: vscode.CancellationToken,
   ): Promise<void> {
     await this.sourcePackagesScript();
-    const specs = packages
+    const requested = packages
       .filter((pkg) => pkg?.name && pkg.name.trim().length > 0)
-      .map((pkg) =>
-        pkg.version && pkg.version.trim().length > 0
-          ? `${pkg.name.trim()}@${pkg.version.trim()}`
-          : pkg.name.trim(),
-      );
+      .map((pkg) => ({
+        name: pkg.name.trim(),
+        version: pkg.version?.trim() ?? "",
+      }));
+    const specs = requested.map((pkg) =>
+      pkg.version.length > 0 ? `${pkg.name}@${pkg.version}` : pkg.name,
+    );
 
     if (specs.length === 0) {
       return;
@@ -181,6 +178,9 @@ export class JuliaPackageManager
 
     const code = `_positron_install_packages(${this._toJuliaStringVector(specs)})`;
     await this._executeAndWait(code, MUTATION_TIMEOUT_MS, token);
+    this._firePackagesChanged(
+      this._uniquePackageNames(requested.map((pkg) => pkg.name)),
+    );
   }
 
   async uninstallPackages(
@@ -202,6 +202,7 @@ export class JuliaPackageManager
       MUTATION_TIMEOUT_MS,
       token,
     );
+    this._firePackagesChanged();
   }
 
   async updatePackages(
@@ -210,9 +211,11 @@ export class JuliaPackageManager
   ): Promise<void> {
     await this.sourcePackagesScript();
 
-    const names = packages
-      .filter((pkg) => pkg?.name && pkg.name.trim().length > 0)
-      .map((pkg) => pkg.name.trim());
+    const names = this._uniquePackageNames(
+      packages
+        .filter((pkg) => pkg?.name && pkg.name.trim().length > 0)
+        .map((pkg) => pkg.name.trim()),
+    );
 
     if (names.length === 0) {
       return;
@@ -223,15 +226,32 @@ export class JuliaPackageManager
       MUTATION_TIMEOUT_MS,
       token,
     );
+    this._firePackagesChanged(names);
   }
 
-  async updateAllPackages(token?: vscode.CancellationToken): Promise<void> {
+  async updateAllPackages(token?: vscode.CancellationToken): Promise<string[]> {
     await this.sourcePackagesScript();
+    const packagesBefore = await this._listPackagesFromRuntime(token);
+
     await this._executeAndWait(
       "_positron_update_all_packages()",
       MUTATION_TIMEOUT_MS,
       token,
     );
+
+    if (token?.isCancellationRequested) {
+      return [];
+    }
+
+    const packagesAfter = await this._listPackagesFromRuntime(token);
+    const changedPackageNames = this._findChangedPackageNames(
+      packagesBefore,
+      packagesAfter,
+    );
+
+    this._firePackagesChanged(changedPackageNames);
+
+    return changedPackageNames;
   }
 
   async searchPackages(
@@ -347,6 +367,40 @@ export class JuliaPackageManager
         }
       }),
     );
+  }
+
+  private async _listPackagesFromRuntime(
+    token?: vscode.CancellationToken,
+  ): Promise<positron.LanguageRuntimePackage[]> {
+    const raw = await this._executeAndCapture(
+      "_positron_list_packages()",
+      positron.RuntimeCodeExecutionMode.Silent,
+      QUERY_TIMEOUT_MS,
+      token,
+    );
+
+    return this._parsePackages(raw);
+  }
+
+  private _findChangedPackageNames(
+    before: positron.LanguageRuntimePackage[],
+    after: positron.LanguageRuntimePackage[],
+  ): string[] {
+    const versionsBefore = new Map(
+      before.map((pkg) => [pkg.name, pkg.version] as const),
+    );
+
+    return after
+      .filter((pkg) => {
+        const previousVersion = versionsBefore.get(pkg.name);
+        return previousVersion !== undefined && previousVersion !== pkg.version;
+      })
+      .map((pkg) => pkg.name)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  private _uniquePackageNames(names: string[]): string[] {
+    return Array.from(new Set(names));
   }
 
   private _parsePackages(raw: string): positron.LanguageRuntimePackage[] {

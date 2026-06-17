@@ -101,13 +101,30 @@ using JSON3
         @test Positron.resolve_symbol("Base.nonexistent") === nothing
     end
 
-    @testset "Symbol Resolution - Unimported Packages" begin
-        # UUIDs is a standard library that is installed.
-        # It should get imported and resolved successfully.
-        sym = Positron.resolve_symbol("UUIDs")
-        @test sym !== nothing
-        @test sym isa Module
-        @test isdefined(Main, :UUIDs)
+    @testset "Symbol Resolution - Unimported Package Setting" begin
+        package_name = "PrecompileTools"
+        package_sym = Symbol(package_name)
+        old_setting = get(ENV, Positron.HELP_IMPORT_UNIMPORTED_PACKAGES_ENV, nothing)
+
+        try
+            @test !isdefined(Main, package_sym)
+
+            ENV[Positron.HELP_IMPORT_UNIMPORTED_PACKAGES_ENV] = "0"
+            @test Positron.resolve_symbol(package_name) === nothing
+            @test !isdefined(Main, package_sym)
+
+            ENV[Positron.HELP_IMPORT_UNIMPORTED_PACKAGES_ENV] = "1"
+            sym = Positron.resolve_symbol(package_name)
+            @test sym !== nothing
+            @test sym isa Module
+            @test isdefined(Main, package_sym)
+        finally
+            if old_setting === nothing
+                delete!(ENV, Positron.HELP_IMPORT_UNIMPORTED_PACKAGES_ENV)
+            else
+                ENV[Positron.HELP_IMPORT_UNIMPORTED_PACKAGES_ENV] = old_setting
+            end
+        end
     end
 
     @testset "Fetch Documentation - Functions" begin

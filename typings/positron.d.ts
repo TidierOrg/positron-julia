@@ -1278,7 +1278,7 @@ declare module 'positron' {
 		installPackages(packages: PackageSpec[], token?: vscode.CancellationToken): Thenable<void>;
 		uninstallPackages(packageNames: string[], token?: vscode.CancellationToken): Thenable<void>;
 		updatePackages(packages: PackageSpec[], token?: vscode.CancellationToken): Thenable<void>;
-		updateAllPackages(token?: vscode.CancellationToken): Thenable<void>;
+		updateAllPackages(token?: vscode.CancellationToken): Thenable<void | string[]>;
 		searchPackages(query: string, token?: vscode.CancellationToken): Thenable<LanguageRuntimePackage[]>;
 		searchPackageVersions(name: string, token?: vscode.CancellationToken): Thenable<string[]>;
 		/**
@@ -1296,10 +1296,11 @@ declare module 'positron' {
 
 		/**
 		 * Fired when the set of loaded/attached packages may have changed
-		 * (e.g. the user ran `using Foo` in the console). The packages pane
-		 * subscribes to this to refresh without polling.
+		 * (e.g. the user ran `using Foo` in the console). Language runtimes may
+		 * include package names after install/update operations so hosts can
+		 * highlight or report the affected rows.
 		 */
-		onDidChangePackages?: vscode.Event<void>;
+		onDidChangePackages?: vscode.Event<void | string[]>;
 	}
 
 	/**

@@ -306,6 +306,12 @@
           "default": "",
           "description": "Optional path to a Julia project environment for Language Server analysis."
         },
+        "positron.julia.help.importUnimportedPackages": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Allow Julia Help to import installed packages into `Main` when resolving documentation for packages that have not been imported. Restart the Julia session after changing this setting."
+        },
         "positron.julia.semanticHighlighting.enabled": {
           "type": "boolean",
           "default": true,
