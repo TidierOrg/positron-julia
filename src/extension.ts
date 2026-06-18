@@ -159,7 +159,12 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Notify users when kernel-affecting settings change (only take effect on next session)
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			const kernelSettings = ['julia.NumThreads', 'julia.additionalArgs', 'julia.packageServer'];
+			const kernelSettings = [
+				'julia.NumThreads',
+				'julia.additionalArgs',
+				'julia.packageServer',
+				'positron.julia.help.importUnimportedPackages',
+			];
 			if (kernelSettings.some(s => event.affectsConfiguration(s))) {
 				vscode.window.showInformationMessage(
 					'Julia: Restart the Julia session to apply the updated settings.'

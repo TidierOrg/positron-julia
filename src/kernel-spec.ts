@@ -24,12 +24,14 @@ export function createJuliaKernelSpec(installation: JuliaInstallation, userProje
 
 	// Get Julia-specific user settings
 	const juliaConfig = vscode.workspace.getConfiguration('julia');
+	const positronJuliaConfig = vscode.workspace.getConfiguration('positron.julia');
 	const numThreadsSetting = juliaConfig.get<number | string | null>('NumThreads', null);
 	const numThreads = numThreadsSetting !== null && numThreadsSetting !== undefined
 		? String(numThreadsSetting)
 		: (process.env.JULIA_NUM_THREADS || 'auto');
 	const additionalArgs = juliaConfig.get<string[]>('additionalArgs', []);
 	const packageServer = juliaConfig.get<string>('packageServer', '').trim();
+	const importUnimportedHelpPackages = positronJuliaConfig.get<boolean>('help.importUnimportedPackages', true);
 
 	// Build the kernel arguments
 	// The {connection_file} and {log_file} placeholders are replaced by the supervisor
@@ -56,6 +58,7 @@ export function createJuliaKernelSpec(installation: JuliaInstallation, userProje
 		POSITRON: '1',
 		POSITRON_VERSION: vscode.version,
 		POSITRON_MODE: 'console',
+		POSITRON_JULIA_HELP_IMPORT_UNIMPORTED_PACKAGES: importUnimportedHelpPackages ? '1' : '0',
 
 		// Log level for debugging
 		JULIA_DEBUG: logLevel === 'trace' || logLevel === 'debug' ? 'all' : '',

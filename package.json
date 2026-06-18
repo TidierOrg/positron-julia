@@ -2,7 +2,7 @@
   "name": "positron-julia",
   "displayName": "Julia for Positron",
   "description": "Julia language support for Positron IDE",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "publisher": "ntluong95",
   "author": "TidierOrg, rdboyes, ntluong95",
   "contributors": [
@@ -305,6 +305,12 @@
           "type": "string",
           "default": "",
           "description": "Optional path to a Julia project environment for Language Server analysis."
+        },
+        "positron.julia.help.importUnimportedPackages": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Allow Julia Help to import installed packages into `Main` when resolving documentation for packages that have not been imported. Restart the Julia session after changing this setting."
         },
         "positron.julia.semanticHighlighting.enabled": {
           "type": "boolean",

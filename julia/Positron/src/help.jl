@@ -12,10 +12,12 @@ for Julia functions, types, and modules.
 
 using Markdown
 using Sockets
+import Pkg
 
 const HELP_SERVER_MAX_PAGES = 128
 const HELP_METHODS_MAX = 25
 const HELP_RESOURCES_DIR = normpath(joinpath(@__DIR__, "..", "resources"))
+const HELP_IMPORT_UNIMPORTED_PACKAGES_ENV = "POSITRON_JULIA_HELP_IMPORT_UNIMPORTED_PACKAGES"
 const JULIA_HELP_KEYWORDS = Set([
     "if",
     "else",
@@ -53,6 +55,44 @@ const JULIA_HELP_KEYWORDS = Set([
     "do",
 ])
 const JULIA_HELP_LITERALS = Set(["true", "false", "nothing", "missing", "undef", "NaN", "Inf"])
+
+function should_import_unimported_help_packages()::Bool
+    value = lowercase(strip(get(ENV, HELP_IMPORT_UNIMPORTED_PACKAGES_ENV, "1")))
+    return !(value in ("0", "false", "no", "off"))
+end
+
+function is_installed_help_package(name::AbstractString)::Bool
+    isempty(name) && return false
+
+    try
+        return any(dep -> dep.name == name, values(Pkg.dependencies()))
+    catch
+        return false
+    end
+end
+
+function maybe_import_unimported_help_package(name::AbstractString)::Union{Module, Nothing}
+    should_import_unimported_help_packages() || return nothing
+    is_installed_help_package(name) || return nothing
+
+    sym = Symbol(name)
+    try
+        # Import into a throw-away module so Main is never polluted.
+        # The package is loaded into Julia's module cache as normal, but the
+        # binding in Main is never created, so the Package Pane does not flip
+        # the package to "attached".
+        m = Module()
+        Core.eval(m, :(import $(sym)))
+        isdefined(m, sym) || return nothing
+        return m
+    catch
+        return nothing
+    end
+end
+
+function get_help_binding(module_::Module, sym::Symbol)
+    return Base.invokelatest(getfield, module_, sym)
+end
 
 """
 The Help service manages the Help pane in Positron.
@@ -189,18 +229,29 @@ function resolve_symbol(topic::String)
         # Start from Main
         current = Main
 
+        # Optionally load installed packages into a temp module so Help can
+        # resolve docs before the user has imported the package into Main.
+        # We use a throw-away module so Main is never mutated.
+        first_sym = Symbol(parts[1])
+        if !isdefined(Main, first_sym)
+            temp = maybe_import_unimported_help_package(parts[1])
+            if temp !== nothing
+                current = temp
+            end
+        end
+
         for (i, part) in enumerate(parts)
             sym = Symbol(part)
 
             if i == length(parts)
                 # Final part - could be a function, type, or value
                 if isdefined(current, sym)
-                    return getfield(current, sym)
+                    return get_help_binding(current, sym)
                 end
             else
                 # Intermediate part - should be a module
                 if isdefined(current, sym)
-                    val = getfield(current, sym)
+                    val = get_help_binding(current, sym)
                     if val isa Module
                         current = val
                     else

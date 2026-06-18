@@ -47,6 +47,7 @@ On first launch, the extension automatically installs required Julia packages (`
 | `positron.julia.executablePath`                 | `""`    | Path to a specific Julia executable                         |
 | `positron.julia.languageServer.enabled`         | `true`  | Enable/disable the Julia Language Server                    |
 | `positron.julia.languageServer.environmentPath` | `""`    | Path to a Julia project environment for the Language Server |
+| `positron.julia.help.importUnimportedPackages`  | `true`  | Allow Help lookups to import installed packages into `Main` |
 | `julia.lint.missingrefs`                        | `"all"` | Control missing-reference diagnostics (`all`, `id`, `none`) |
 
 

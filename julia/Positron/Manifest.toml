@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "fb0a4efd3f60b2e7ddc73ce96f419d2865028ed2"
+project_hash = "d7ca81d6f9dd13944e3d198a259cc2fa0919c2dc"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1144,7 +1144,7 @@ uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
 version = "1.4.3"
 
 [[deps.Positron]]
-deps = ["Base64", "Coverage", "DataFrames", "Dates", "IJulia", "JSON3", "Logging", "Makie", "Markdown", "PrecompileTools", "REPL", "Sockets", "Statistics", "StructTypes", "UUIDs"]
+deps = ["Base64", "DataFrames", "Dates", "IJulia", "JSON3", "Logging", "Markdown", "Pkg", "PrecompileTools", "REPL", "Sockets", "Statistics", "StructTypes", "TOML", "UUIDs"]
 path = "."
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 version = "0.1.0"

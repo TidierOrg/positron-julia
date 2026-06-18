@@ -140,10 +140,19 @@ export class JuliaLanguageClient implements vscode.Disposable {
 	 */
 	private isLanguageServerInstalled(installation: JuliaInstallation): boolean {
 		const depotPath = this.getLsDepotPath(installation);
-		// Check if the environment directory exists with a Manifest.toml
-		const envPath = path.join(depotPath, 'environments', `v${installation.version.match(/^(\d+\.\d+)/)?.[1] || '1.x'}`);
+		const minorVersion = installation.version.match(/^(\d+\.\d+)/)?.[1] || '1.x';
+		const envPath = path.join(depotPath, 'environments', `v${minorVersion}`);
+		const projectPath = path.join(envPath, 'Project.toml');
 		const manifestPath = path.join(envPath, 'Manifest.toml');
-		return fs.existsSync(manifestPath);
+
+		if (!fs.existsSync(manifestPath) || !fs.existsSync(projectPath)) {
+			return false;
+		}
+
+		// Both LanguageServer and SymbolServer must be direct deps in Project.toml.
+		// In Julia 1.9+, `using X` fails for packages that are only transitive deps.
+		const project = fs.readFileSync(projectPath, 'utf8');
+		return project.includes('LanguageServer') && project.includes('SymbolServer');
 	}
 
 	/**
