@@ -468,11 +468,21 @@ export class JuliaPackageManager
       const record = value as Record<string, unknown>;
       const partial: Partial<positron.LanguageRuntimePackage> = {};
 
+      // The installed version the metadata was computed for. The Packages pane
+      // uses this to confirm the metadata still matches the installed package
+      // before merging the outdated/latestVersion fields.
+      if (typeof record.version === "string" && record.version.length > 0) {
+        partial.version = record.version;
+      }
       if (
         typeof record.latestVersion === "string" &&
         record.latestVersion.length > 0
       ) {
         partial.latestVersion = record.latestVersion;
+      }
+      // Precomputed by the Julia runtime; drives the "update available" arrow.
+      if (typeof record.outdated === "boolean") {
+        partial.outdated = record.outdated;
       }
       if (typeof record.license === "string" && record.license.length > 0) {
         partial.license = record.license;

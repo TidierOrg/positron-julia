@@ -1257,6 +1257,13 @@ declare module 'positron' {
 		 * Distinct from being loaded as a transitive dependency.
 		 */
 		attached?: boolean;
+		/**
+		 * Whether the installed version is strictly older than the latest
+		 * available version. Computed by the language runtime using its own
+		 * native version semantics and surfaced as a precomputed boolean so the
+		 * frontend never re-implements version comparison.
+		 */
+		outdated?: boolean;
 		/** Optional short description or summary shown in the Packages pane card view. */
 		description?: string;
 		/** Optional package website, repository, or documentation URL. */

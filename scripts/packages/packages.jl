@@ -13,8 +13,10 @@ const _PositronPackage = NamedTuple{
 """
 Canonical ordered list of metadata fields for JSON serialization.
 """
-# Keep deterministic field order in JSON output.
-const _POSITRON_METADATA_FIELDS = ("latestVersion", "license", "description", "url")
+# Keep deterministic field order in JSON output. "outdated" is serialized as a
+# raw JSON boolean (see _positron_print_json_metadata); all others are strings.
+const _POSITRON_METADATA_FIELDS = ("version", "latestVersion", "outdated", "license", "description", "url")
+const _POSITRON_METADATA_BOOL_FIELDS = ("outdated",)
 """
 Map of package name to its metadata field dictionary.
 """
@@ -22,6 +24,9 @@ const _MetadataByName = Dict{String, Dict{String, String}}
 const _POSITRON_PROJECT_METADATA_BY_PATH = Dict{String, Tuple{String, String, String}}()
 const _POSITRON_DESCRIPTION_BY_PATH = Dict{String, String}()
 const _POSITRON_REGISTRY_URL_BY_NAME = Dict{String, String}()
+# Cache of latest registry version keyed by lowercase package name. Populated
+# during metadata fetches so subsequent calls skip the full registry scan.
+const _POSITRON_REGISTRY_LATEST_VERSION_BY_NAME = Dict{String, String}()
 
 function _positron_json_string(value::AbstractString)::String
     return "\"" * escape_string(value) * "\""
@@ -294,11 +299,14 @@ function _positron_list_packages(direct_only::Bool=true)
             continue
         end
         name = package_info.name
-        version = string(package_info.version)
+        # package_info.version is Union{VersionNumber, Nothing}; stdlib packages
+        # may have nothing, so guard against string(nothing) == "nothing".
+        version_val = package_info.version
+        version = version_val === nothing ? "" : string(version_val)
         description = _positron_read_package_description(_positron_package_source_path(package_info))
         url = _positron_package_url(package_info)
         push!(packages, (
-            id = "$(name)-$(version)",
+            id = isempty(version) ? name : "$(name)-$(version)",
             name = name,
             displayName = name,
             version = version,
@@ -344,10 +352,28 @@ function _positron_update_all_packages()
     return nothing
 end
 
-function _positron_latest_registry_version(entry)
-    info = Pkg.Registry.registry_info(entry)
-    isempty(info.version_info) && return "0"
+function _positron_latest_registry_version(entry)::String
+    info = try
+        Pkg.Registry.registry_info(entry)
+    catch
+        return ""
+    end
+    isempty(info.version_info) && return ""
     return string(maximum(keys(info.version_info)))
+end
+
+"""
+Return true when `latest` is a strictly newer version than `installed`, using
+Julia's native VersionNumber comparison. Returns false when either version is
+empty or cannot be parsed, so the Packages pane never shows a spurious arrow.
+"""
+function _positron_version_outdated(installed::AbstractString, latest::AbstractString)::Bool
+    (isempty(installed) || isempty(latest)) && return false
+    return try
+        VersionNumber(latest) > VersionNumber(installed)
+    catch
+        false
+    end
 end
 
 function _positron_search_packages(query::String)
@@ -365,18 +391,15 @@ function _positron_search_packages(query::String)
             package_name = entry.name
             occursin(query, lowercase(package_name)) || continue
 
-            version = try
-                _positron_latest_registry_version(entry)
-            catch
-                "0"
-            end
+            version = _positron_latest_registry_version(entry)
+            isempty(version) && continue
 
             previous = get(by_name, package_name, nothing)
             if previous === nothing
                 by_name[package_name] = version
             elseif previous != version
                 try
-                    if previous == "0" || VersionNumber(version) > VersionNumber(previous)
+                    if VersionNumber(version) > VersionNumber(previous)
                         by_name[package_name] = version
                     end
                 catch
@@ -424,7 +447,12 @@ function _positron_print_json_metadata(by_name::_MetadataByName)
             value === nothing && continue
             inner_first || print(",")
             inner_first = false
-            print(_positron_json_string(key), ":", _positron_json_string(value))
+            if key in _POSITRON_METADATA_BOOL_FIELDS
+                # Serialize as a raw JSON boolean (the dict stores "true"/"false").
+                print(_positron_json_string(key), ":", value == "true" ? "true" : "false")
+            else
+                print(_positron_json_string(key), ":", _positron_json_string(value))
+            end
         end
         print("}")
     end
@@ -446,15 +474,23 @@ function _positron_package_metadata(names::Vector{String})
         return
     end
 
+    # Skip the full registry scan for packages whose latest version is already
+    # cached from a previous call within this session.
+    uncached_targets = Set{String}(
+        t for t in targets
+        if !haskey(_POSITRON_REGISTRY_LATEST_VERSION_BY_NAME, t) ||
+            isempty(_POSITRON_REGISTRY_LATEST_VERSION_BY_NAME[t])
+    )
+
     for registry in Pkg.Registry.reachable_registries()
         for entry in values(registry.pkgs)
-            lowercase(entry.name) in targets || continue
+            entry_lower = lowercase(entry.name)
+            entry_lower in uncached_targets || continue
 
-            version = try
-                _positron_latest_registry_version(entry)
-            catch
-                "0"
-            end
+            version = _positron_latest_registry_version(entry)
+            # Skip entries with no version info to avoid false "update available"
+            # indicators (e.g. dev packages or malformed registry entries).
+            isempty(version) && continue
 
             fields = get!(by_name, entry.name, Dict{String,String}())
             previous = get(fields, "latestVersion", nothing)
@@ -462,7 +498,7 @@ function _positron_package_metadata(names::Vector{String})
                 fields["latestVersion"] = version
             elseif previous != version
                 try
-                    if previous == "0" || VersionNumber(version) > VersionNumber(previous)
+                    if VersionNumber(version) > VersionNumber(previous)
                         fields["latestVersion"] = version
                     end
                 catch
@@ -473,27 +509,67 @@ function _positron_package_metadata(names::Vector{String})
             url = _positron_registry_entry_url(entry)
             if !isempty(url)
                 fields["url"] = url
-                _POSITRON_REGISTRY_URL_BY_NAME[lowercase(entry.name)] = url
+                _POSITRON_REGISTRY_URL_BY_NAME[entry_lower] = url
             end
         end
     end
 
+    # Write newly scanned latest versions to the session cache.
+    for (name, fields) in by_name
+        v = get(fields, "latestVersion", nothing)
+        v === nothing || (_POSITRON_REGISTRY_LATEST_VERSION_BY_NAME[lowercase(name)] = v)
+    end
+
+    # Walk installed dependencies to attach the installed version, the precomputed
+    # `outdated` flag, and local description/license/URL. The Packages pane queries
+    # metadata for installed packages, so this is the primary path. We compute
+    # `outdated` here (rather than in the frontend) using Julia's VersionNumber
+    # semantics, matching the precomputed-boolean contract the pane expects.
+    matched_targets = Set{String}()
     for package_info in values(Pkg.dependencies())
         package_name = package_info.name
-        lowercase(package_name) in targets || continue
+        package_lower = lowercase(package_name)
+        package_lower in targets || continue
+        push!(matched_targets, package_lower)
+
+        fields = get!(by_name, package_name, Dict{String,String}())
+
+        version_val = package_info.version
+        installed = version_val === nothing ? "" : string(version_val)
+        isempty(installed) || (fields["version"] = installed)
+
+        # latestVersion may have come from the registry scan above; otherwise pull
+        # it from the session cache (cached targets skip the scan).
+        if !haskey(fields, "latestVersion")
+            cached_latest = get(_POSITRON_REGISTRY_LATEST_VERSION_BY_NAME, package_lower, "")
+            isempty(cached_latest) || (fields["latestVersion"] = cached_latest)
+        end
+
+        latest = get(fields, "latestVersion", "")
+        if !isempty(installed) && !isempty(latest)
+            fields["outdated"] = _positron_version_outdated(installed, latest) ? "true" : "false"
+        end
+
         package_path = _positron_package_source_path(package_info)
         if !isempty(package_path)
             description, license, url = _positron_read_project_metadata(package_path)
             isempty(description) && (description = _positron_read_package_description(package_path))
             isempty(url) && (url = _positron_package_source_url(package_info))
             isempty(url) && (url = _positron_registry_package_url(package_name))
-            if !isempty(description) || !isempty(license) || !isempty(url)
-                fields = get!(by_name, package_name, Dict{String,String}())
-                isempty(description) || (fields["description"] = description)
-                isempty(license) || (fields["license"] = license)
-                isempty(url) || (fields["url"] = url)
-            end
+            isempty(description) || (fields["description"] = description)
+            isempty(license) || (fields["license"] = license)
+            isempty(url) || (fields["url"] = url)
         end
+    end
+
+    # For cached targets that are not installed locally (e.g. queried before the
+    # dependency exists), surface the latest version on its own. Keyed by the
+    # lowercase target since the canonical casing is unknown here.
+    for t in setdiff(targets, uncached_targets)
+        t in matched_targets && continue
+        any(lowercase(name) == t for name in keys(by_name)) && continue
+        cached_latest = get(_POSITRON_REGISTRY_LATEST_VERSION_BY_NAME, t, "")
+        isempty(cached_latest) || (by_name[t] = Dict{String,String}("latestVersion" => cached_latest))
     end
 
     _positron_print_json_metadata(by_name)
