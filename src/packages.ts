@@ -45,6 +45,11 @@ export class JuliaPackageManager
     Promise<string | undefined>
   >();
 
+  private readonly _publishedDateCache = new Map<
+    string,
+    Promise<string | undefined>
+  >();
+
   private readonly _onDidChangePackages = new vscode.EventEmitter<
     void | string[]
   >();
@@ -148,11 +153,14 @@ export class JuliaPackageManager
   ): Promise<positron.LanguageRuntimePackage[]> {
     await this.sourcePackagesScript();
 
-    const packages = await this._listPackagesFromRuntime(token);
+    const stdlibNames = new Set<string>();
+    const packages = await this._listPackagesFromRuntime(token, stdlibNames);
 
     // Important: the packages pane uses this method, not only getPackageMetadata().
-    // Therefore, fetch and replace descriptions here too.
-    await this._replaceDescriptionsFromJuliaPackages(packages);
+    // Therefore, fetch and replace descriptions here too. Standard library
+    // packages are skipped: juliapackages.com carries stale entries for
+    // pre-stdlib packages of the same name (e.g. a "[DEPRECATED]" Dates.jl).
+    await this._replaceDescriptionsFromJuliaPackages(packages, stdlibNames);
 
     return packages;
   }
@@ -402,22 +410,74 @@ export class JuliaPackageManager
     };
     copyString("name");
     copyString("version");
+    copyString("title");
     copyString("author");
     copyString("license");
     copyString("sourceRepository");
     copyString("description");
     copyString("url");
 
-    // Prefer the curated juliapackages.com description, matching the
-    // getPackages()/getPackageMetadata() behavior so the detail editor
-    // shows the same summary as the list entry.
-    const juliaPackagesDescription =
-      await this._getJuliaPackagesDescriptionCached(trimmed);
-    if (juliaPackagesDescription) {
-      detail.description = juliaPackagesDescription;
+    // Number of direct dependencies, excluding stdlibs. Not yet in the
+    // vendored Positron API, but forwarded so the detail editor's DEPS stat
+    // lights up on builds that render it.
+    if (typeof record.dependencyCount === "number") {
+      (detail as Record<string, number>).dependencyCount =
+        record.dependencyCount;
+    }
+
+    const isStdlib = record.stdlib === true;
+
+    if (!isStdlib) {
+      // Prefer the curated juliapackages.com description, matching the
+      // getPackages()/getPackageMetadata() behavior so the detail editor
+      // shows the same summary as the list entry. Skipped for stdlibs, whose
+      // juliapackages.com entries describe stale pre-stdlib packages.
+      const juliaPackagesDescription =
+        await this._getJuliaPackagesDescriptionCached(trimmed);
+      if (juliaPackagesDescription) {
+        detail.description = juliaPackagesDescription;
+        if (!detail.title) {
+          detail.title = juliaPackagesDescription;
+        }
+      }
+
+      // Julia registries carry no publication dates; best-effort fetch the
+      // release date of the installed version from the package's GitHub
+      // repository (TagBot-conventional "v<version>" tags), cached per
+      // name@version.
+      if (detail.url && detail.version) {
+        const publishedDate = await this._getPublishedDateCached(
+          detail.url,
+          detail.version,
+        );
+        if (publishedDate) {
+          detail.publishedDate = publishedDate;
+        }
+      }
     }
 
     return detail;
+  }
+
+  private _getPublishedDateCached(
+    url: string,
+    version: string,
+  ): Promise<string | undefined> {
+    const repo = parseGitHubRepo(url);
+    if (!repo) {
+      return Promise.resolve(undefined);
+    }
+
+    const key = `${repo.owner}/${repo.name}@${version}`;
+    let cached = this._publishedDateCache.get(key);
+    if (!cached) {
+      cached = fetchPublishedDateFromGitHub(repo.owner, repo.name, version).catch(
+        () => undefined,
+      );
+      this._publishedDateCache.set(key, cached);
+    }
+
+    return cached;
   }
 
   private _getJuliaPackagesDescriptionCached(
@@ -439,9 +499,13 @@ export class JuliaPackageManager
 
   private async _replaceDescriptionsFromJuliaPackages(
     packages: positron.LanguageRuntimePackage[],
+    skipNames?: Set<string>,
   ): Promise<void> {
     await Promise.allSettled(
       packages.map(async (pkg) => {
+        if (skipNames?.has(pkg.name)) {
+          return;
+        }
         const description = await this._getJuliaPackagesDescriptionCached(
           pkg.name,
         );
@@ -454,6 +518,7 @@ export class JuliaPackageManager
 
   private async _listPackagesFromRuntime(
     token?: vscode.CancellationToken,
+    stdlibNames?: Set<string>,
   ): Promise<positron.LanguageRuntimePackage[]> {
     const raw = await this._executeAndCapture(
       "_positron_list_packages()",
@@ -462,7 +527,7 @@ export class JuliaPackageManager
       token,
     );
 
-    return this._parsePackages(raw);
+    return this._parsePackages(raw, stdlibNames);
   }
 
   private _findChangedPackageNames(
@@ -486,7 +551,10 @@ export class JuliaPackageManager
     return Array.from(new Set(names));
   }
 
-  private _parsePackages(raw: string): positron.LanguageRuntimePackage[] {
+  private _parsePackages(
+    raw: string,
+    stdlibNames?: Set<string>,
+  ): positron.LanguageRuntimePackage[] {
     const parsed = this._parseJsonValue(raw);
     if (!Array.isArray(parsed)) {
       return [];
@@ -499,6 +567,12 @@ export class JuliaPackageManager
         const name = typeof record.name === "string" ? record.name : "";
         const version =
           typeof record.version === "string" ? record.version : "";
+
+        // Internal marker from the Julia helper; consumed here (to skip the
+        // juliapackages.com description overlay) and not forwarded.
+        if (record.stdlib === true && name.length > 0) {
+          stdlibNames?.add(name);
+        }
 
         return {
           id: typeof record.id === "string" ? record.id : `${name}-${version}`,
@@ -925,6 +999,100 @@ function fetchDescriptionFromJuliaPackages(
       html ? extractJuliaPackagesDescription(html, slug) : undefined,
     )
     .catch(() => undefined);
+}
+
+/** Parses "https://github.com/owner/repo(.git)" into its owner/repo parts. */
+function parseGitHubRepo(
+  url: string,
+): { owner: string; name: string } | undefined {
+  const match = url.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:[/?#]|$)/i,
+  );
+  if (!match) {
+    return undefined;
+  }
+  return { owner: match[1], name: match[2] };
+}
+
+/**
+ * Fetch the publication date (YYYY-MM-DD) of a package version from its
+ * GitHub release. Julia's registries carry no publication dates, but nearly
+ * all registered packages are released via TagBot, which creates a GitHub
+ * release tagged "v<version>". Best-effort: resolves undefined on any
+ * failure (missing release, rate limit, network error).
+ */
+function fetchPublishedDateFromGitHub(
+  owner: string,
+  repo: string,
+  version: string,
+): Promise<string | undefined> {
+  const url =
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/` +
+    `${encodeURIComponent(repo)}/releases/tags/v${encodeURIComponent(version)}`;
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    const done = (value: string | undefined) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
+
+    const request = https.get(
+      url,
+      {
+        headers: {
+          "User-Agent": "Positron-Julia",
+          Accept: "application/vnd.github+json",
+        },
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          done(undefined);
+          return;
+        }
+
+        res.setEncoding("utf8");
+
+        let data = "";
+        res.on("data", (chunk: string) => {
+          data += chunk;
+        });
+        res.on("end", () => {
+          try {
+            const release = JSON.parse(data) as { published_at?: unknown };
+            const publishedAt =
+              typeof release.published_at === "string"
+                ? release.published_at
+                : undefined;
+            done(
+              publishedAt && publishedAt.length >= 10
+                ? publishedAt.slice(0, 10)
+                : undefined,
+            );
+          } catch {
+            done(undefined);
+          }
+        });
+        res.on("error", () => {
+          done(undefined);
+        });
+      },
+    );
+
+    request.on("error", () => {
+      done(undefined);
+    });
+
+    request.setTimeout(5000, () => {
+      done(undefined);
+      request.destroy();
+    });
+  });
 }
 
 function normalizeJuliaPackageName(packageName: string): string {

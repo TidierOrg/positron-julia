@@ -62,6 +62,7 @@ end
             attached = false,
             description = "",
             url = "https://example.com/home",
+            stdlib = false,
         )]
 
         json = _capture_package_helper_stdout() do
@@ -189,11 +190,64 @@ end
         @test haskey(parsed, "version")
         @test occursin(r"^\d+\.\d+", parsed["version"])
         @test parsed["sourceRepository"] == "General"
+        # No license in JSON3's Project.toml; detected from its LICENSE.md.
+        @test parsed["license"] == "MIT"
+        @test occursin("Jacob Quinn", parsed["author"])
+        # Direct deps excluding stdlibs (Parsers, PrecompileTools, ...).
+        @test parsed["dependencyCount"] isa Number
+        @test parsed["dependencyCount"] >= 1
+        @test !haskey(parsed, "stdlib")
 
         missing_json = _capture_package_helper_stdout() do
             _positron_package_detail("ThisPackageDoesNotExist12345")
         end
         @test strip(missing_json) == "null"
+    end
+
+    @testset "Package Detail Stdlib" begin
+        # Dates is a standard library and a dependency of Positron.jl, so it
+        # is visible in Pkg.dependencies() for the test environment.
+        json = _capture_package_helper_stdout() do
+            _positron_package_detail("Dates")
+        end
+
+        parsed = JSON3.read(json, Dict{String, Any})
+        @test parsed["name"] == "Dates"
+        @test parsed["stdlib"] === true
+        @test parsed["license"] == "MIT"
+        @test parsed["sourceRepository"] == "Julia standard library"
+        @test startswith(parsed["url"], "https://docs.julialang.org/")
+        # The one-line title comes from the stdlib's docs/src/index.md.
+        @test haskey(parsed, "title")
+        @test occursin("Dates", parsed["title"])
+    end
+
+    @testset "License Detection" begin
+        @test _positron_detect_license_text("MIT License\nCopyright (c)") == "MIT"
+        @test _positron_detect_license_text(
+            "The X.jl package is licensed under the MIT \"Expat\" License",
+        ) == "MIT"
+        @test _positron_detect_license_text(
+            "Apache License\nVersion 2.0, January 2004",
+        ) == "Apache-2.0"
+        @test _positron_detect_license_text(
+            "GNU GENERAL PUBLIC LICENSE\nVersion 3, 29 June 2007",
+        ) == "GPL-3.0"
+        @test _positron_detect_license_text("Some proprietary text") == ""
+
+        empty!(_POSITRON_LICENSE_BY_PATH)
+        mktempdir() do package_dir
+            write(
+                joinpath(package_dir, "LICENSE.md"),
+                "The Example.jl package is licensed under the MIT License.\n",
+            )
+            @test _positron_read_license_file(package_dir) == "MIT"
+        end
+
+        empty!(_POSITRON_LICENSE_BY_PATH)
+        mktempdir() do package_dir
+            @test _positron_read_license_file(package_dir) == ""
+        end
     end
 
     @testset "Missing Packages Detection" begin
