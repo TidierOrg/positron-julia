@@ -56,6 +56,22 @@ async function runActiveFile(editor: vscode.TextEditor): Promise<void> {
   }
 
   await document.save();
+
+  // Offer to install missing packages before running the file. The
+  // preflight runs in the Positron frontend and returns whether to
+  // proceed (false only if the user cancels).
+  try {
+    const proceed = await vscode.commands.executeCommand<boolean>(
+      "positron.missingPackages.preflight",
+      document.uri,
+    );
+    if (proceed === false) {
+      return;
+    }
+  } catch {
+    // Command not available in this Positron build; proceed normally.
+  }
+
   const escapedPath = escapeForJuliaString(document.uri.fsPath);
   await executeJuliaCode(`include("${escapedPath}")`);
 }

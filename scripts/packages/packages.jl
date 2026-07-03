@@ -577,6 +577,39 @@ function _positron_package_metadata(names::Vector{String})
 end
 
 """
+Given top-level module/package names referenced in user code, print the JSON
+array of names that are (a) not currently loadable via `Base.identify_package`
+(i.e. not a stdlib and not a dependency of the active project) AND (b) present
+by exact name in a reachable registry (i.e. actually installable). Matches the
+"referenced, not installed, installable" contract of Positron's
+listMissingPackages hook: never offer to install an unresolvable name.
+"""
+function _positron_missing_packages(names::Vector{String})
+    candidates = Set{String}()
+    for raw in names
+        cleaned = String(strip(raw))
+        isempty(cleaned) && continue
+        # Loadable already (stdlib or active-project dep) -> not missing.
+        Base.identify_package(cleaned) === nothing || continue
+        push!(candidates, cleaned)
+    end
+
+    installable = String[]
+    if !isempty(candidates)
+        for registry in Pkg.Registry.reachable_registries()
+            for entry in values(registry.pkgs)
+                entry.name in candidates || continue
+                push!(installable, entry.name)
+                delete!(candidates, entry.name)
+            end
+            isempty(candidates) && break
+        end
+    end
+
+    _positron_print_json_string_array(sort!(installable))
+end
+
+"""
 Look up the installed dependency named `name` (case-insensitive exact match)
 in `Pkg.dependencies()`. Returns `nothing` when the package is not installed.
 """

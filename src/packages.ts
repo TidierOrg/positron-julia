@@ -295,6 +295,36 @@ export class JuliaPackageManager
     return this._parseStringArray(raw);
   }
 
+  /**
+   * Filter candidate package names down to the ones that are not loadable
+   * in the session (not a stdlib, not an active-project dependency) but
+   * exist by exact name in a reachable registry. Powers the session's
+   * listMissingPackages hook with a single kernel round-trip.
+   */
+  async missingPackages(
+    names: string[],
+    token?: vscode.CancellationToken,
+  ): Promise<string[]> {
+    const cleaned = this._uniquePackageNames(
+      names.map((name) => name.trim()).filter((name) => name.length > 0),
+    );
+
+    if (cleaned.length === 0) {
+      return [];
+    }
+
+    await this.sourcePackagesScript();
+
+    const raw = await this._executeAndCapture(
+      `_positron_missing_packages(${this._toJuliaStringVector(cleaned)})`,
+      positron.RuntimeCodeExecutionMode.Silent,
+      QUERY_TIMEOUT_MS,
+      token,
+    );
+
+    return this._parseStringArray(raw);
+  }
+
   async getPackageMetadata(
     packageNames: string[],
     token?: vscode.CancellationToken,

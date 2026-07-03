@@ -195,4 +195,36 @@ end
         end
         @test strip(missing_json) == "null"
     end
+
+    @testset "Missing Packages Detection" begin
+        read_missing = function (names)
+            json = _capture_package_helper_stdout() do
+                _positron_missing_packages(names)
+            end
+            return JSON3.read(json, Vector{String})
+        end
+
+        # Installed in the test environment -> not missing.
+        @test read_missing(["JSON3"]) == String[]
+
+        # Stdlib: loadable without being a project dependency -> not missing.
+        @test read_missing(["LinearAlgebra"]) == String[]
+
+        # Not in any registry -> never offered, even though not installed.
+        @test read_missing(["ThisPackageDoesNotExist12345"]) == String[]
+
+        # Registered in General but not installed in the test project ->
+        # missing and installable. `Example` is the canonical minimal
+        # registered package and is not a dependency of Positron.jl.
+        @test read_missing(["Example"]) == ["Example"]
+
+        # Mixed list keeps only the missing installable subset.
+        @test read_missing([
+            "JSON3",
+            "LinearAlgebra",
+            "Example",
+            "ThisPackageDoesNotExist12345",
+            "",
+        ]) == ["Example"]
+    end
 end
