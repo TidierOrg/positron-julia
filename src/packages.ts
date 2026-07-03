@@ -1255,6 +1255,13 @@ function isUsefulPackageDescription(value: string): boolean {
     return false;
   }
 
+  // A single word is never a real description; it is a page label like
+  // "Author", "Popularity", or "Dependencies" that slipped past the
+  // heading-based extraction.
+  if (!/\s/.test(text)) {
+    return false;
+  }
+
   if (
     lower === "search" ||
     lower === "learn more" ||

@@ -222,6 +222,71 @@ end
         @test occursin("Dates", parsed["title"])
     end
 
+    @testset "Stdlib Module Docstring" begin
+        # Signature-line variant with a trailing code fence (like Dates).
+        mktempdir() do package_dir
+            mkpath(joinpath(package_dir, "src"))
+            write(
+                joinpath(package_dir, "src", "Example.jl"),
+                """
+                # This file is a part of Julia. License is MIT.
+
+                \"\"\"
+                    Example
+
+                Tools for testing docstring extraction,
+                spanning two lines.
+
+                ```jldoctest
+                julia> 1
+                ```
+                \"\"\"
+                module Example
+                end
+                """,
+            )
+            @test _positron_stdlib_module_docstring(package_dir, "Example") ==
+                "Tools for testing docstring extraction, spanning two lines."
+        end
+
+        # Direct prose variant (like Sockets).
+        mktempdir() do package_dir
+            mkpath(joinpath(package_dir, "src"))
+            write(
+                joinpath(package_dir, "src", "Example.jl"),
+                """
+                \"\"\"
+                Support for examples. Provides [`Example`](@ref).
+                \"\"\"
+                module Example
+                end
+                """,
+            )
+            @test _positron_stdlib_module_docstring(package_dir, "Example") ==
+                "Support for examples. Provides Example."
+        end
+
+        # No module docstring.
+        mktempdir() do package_dir
+            mkpath(joinpath(package_dir, "src"))
+            write(
+                joinpath(package_dir, "src", "Example.jl"),
+                "module Example\nend\n",
+            )
+            @test _positron_stdlib_module_docstring(package_dir, "Example") == ""
+        end
+    end
+
+    @testset "Stdlib List Description" begin
+        # The shared description reader falls back to the module docstring for
+        # stdlibs, so list rows and the detail editor show the same text.
+        empty!(_POSITRON_DESCRIPTION_BY_PATH)
+        dates_path = joinpath(Sys.STDLIB, "Dates")
+        description = _positron_read_package_description(dates_path)
+        @test !isempty(description)
+        @test occursin("Dates", description)
+    end
+
     @testset "License Detection" begin
         @test _positron_detect_license_text("MIT License\nCopyright (c)") == "MIT"
         @test _positron_detect_license_text(

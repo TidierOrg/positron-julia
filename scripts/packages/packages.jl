@@ -204,7 +204,22 @@ function _positron_read_package_description(package_path)
     isempty(package_path) && return ""
     return get!(_POSITRON_DESCRIPTION_BY_PATH, package_path) do
         description, _, _ = _positron_read_project_metadata(package_path)
-        isempty(description) ? _positron_read_readme_description(package_path) : description
+        isempty(description) || return description
+        description = _positron_read_readme_description(package_path)
+        isempty(description) || return description
+        # Standard libraries have no Project.toml description or README; their
+        # module docstring (and failing that, their manual page) is the only
+        # prose that ships with them. Shared by the list and detail paths so
+        # both show the same text.
+        if _positron_is_stdlib_path(package_path)
+            name = basename(String(package_path))
+            description = _positron_stdlib_module_docstring(package_path, name)
+            isempty(description) || return description
+            return _positron_first_markdown_paragraph(
+                joinpath(package_path, "docs", "src", "index.md"),
+            )
+        end
+        return ""
     end
 end
 
@@ -722,6 +737,77 @@ function _positron_first_markdown_paragraph(path::AbstractString)::String
 end
 
 """
+Extract the first prose paragraph of the module docstring at the top of a
+package's `src/<name>.jl`. Standard library sources open with a triple-quoted
+docstring right above `module <Name>`; some start it with an indented
+signature line (e.g. `    Dates`), which is skipped along with fenced code.
+Returns "" when the file is missing or does not start with a docstring.
+"""
+function _positron_stdlib_module_docstring(
+    package_path::AbstractString,
+    name::AbstractString,
+)::String
+    source_path = joinpath(package_path, "src", "$(name).jl")
+    isfile(source_path) || return ""
+    lines = try
+        collect(Iterators.take(eachline(source_path), 60))
+    catch
+        return ""
+    end
+
+    # Find the opening docstring, skipping comments and blank lines. Any
+    # other code first means there is no module docstring.
+    index = 1
+    while index <= length(lines)
+        line = strip(lines[index])
+        if isempty(line) || startswith(line, "#")
+            index += 1
+        else
+            break
+        end
+    end
+    index > length(lines) && return ""
+    opening = strip(lines[index])
+    startswith(opening, "\"\"\"") || return ""
+
+    # Collect the docstring body until the closing triple quote.
+    body = String[]
+    remainder = strip(opening[4:end])
+    if endswith(remainder, "\"\"\"") && length(remainder) >= 3
+        # One-line docstring: """text"""
+        push!(body, strip(remainder[1:end-3]))
+    else
+        isempty(remainder) || push!(body, remainder)
+        index += 1
+        while index <= length(lines)
+            line = lines[index]
+            occursin("\"\"\"", line) && break
+            push!(body, line)
+            index += 1
+        end
+    end
+
+    # First prose paragraph: skip leading blanks and the indented signature
+    # line; stop at the first blank line or fenced code block.
+    paragraph = String[]
+    for raw in body
+        stripped = strip(raw)
+        startswith(stripped, "```") && break
+        if isempty(paragraph)
+            isempty(stripped) && continue
+            # Indented line before any prose is the signature (e.g. "    Dates").
+            startswith(raw, "    ") && continue
+        elseif isempty(stripped)
+            break
+        end
+        text = _positron_markdown_text(stripped)
+        isempty(text) || push!(paragraph, text)
+    end
+
+    return _positron_collapse_whitespace(join(paragraph, " "))
+end
+
+"""
 Return the first sentence of `text` (through the first period followed by
 whitespace), or the whole text when no sentence boundary is found. Used to
 turn a long docs paragraph into a one-line title.
@@ -880,13 +966,8 @@ function _positron_package_detail(name::String)
     if stdlib
         # Standard libraries ship minimal Project.toml metadata: no authors,
         # license, URL, or registry entry. They are part of Julia itself
-        # (MIT-licensed) and documented in the Julia manual; their only prose
-        # description is the first paragraph of docs/src/index.md.
-        if isempty(description)
-            description = _positron_first_markdown_paragraph(
-                joinpath(package_path, "docs", "src", "index.md"),
-            )
-        end
+        # (MIT-licensed) and documented in the Julia manual; the description
+        # reader falls back to their module docstring / manual page.
         isempty(title) && (title = _positron_first_sentence(description))
         isempty(license) && (license = "MIT")
         isempty(url) && (url = _positron_stdlib_docs_url(package_info.name))
