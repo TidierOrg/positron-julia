@@ -7,8 +7,8 @@ import Pkg
 import TOML
 
 const _PositronPackage = NamedTuple{
-    (:id, :name, :displayName, :version, :attached, :description, :url),
-    Tuple{String, String, String, String, Bool, String, String},
+    (:id, :name, :displayName, :version, :attached, :description, :url, :stdlib),
+    Tuple{String, String, String, String, Bool, String, String, Bool},
 }
 """
 Canonical ordered list of metadata fields for JSON serialization.
@@ -27,6 +27,8 @@ const _POSITRON_REGISTRY_URL_BY_NAME = Dict{String, String}()
 # Cache of latest registry version keyed by lowercase package name. Populated
 # during metadata fetches so subsequent calls skip the full registry scan.
 const _POSITRON_REGISTRY_LATEST_VERSION_BY_NAME = Dict{String, String}()
+const _POSITRON_PROJECT_AUTHOR_BY_PATH = Dict{String, String}()
+const _POSITRON_LICENSE_BY_PATH = Dict{String, String}()
 
 function _positron_json_string(value::AbstractString)::String
     return "\"" * escape_string(value) * "\""
@@ -154,6 +156,9 @@ function _positron_print_json_packages(packages)
         if !isempty(package.url)
             print(",\"url\":", _positron_json_string(package.url))
         end
+        if package.stdlib
+            print(",\"stdlib\":true")
+        end
         print("}")
     end
     print("]")
@@ -199,7 +204,22 @@ function _positron_read_package_description(package_path)
     isempty(package_path) && return ""
     return get!(_POSITRON_DESCRIPTION_BY_PATH, package_path) do
         description, _, _ = _positron_read_project_metadata(package_path)
-        isempty(description) ? _positron_read_readme_description(package_path) : description
+        isempty(description) || return description
+        description = _positron_read_readme_description(package_path)
+        isempty(description) || return description
+        # Standard libraries have no Project.toml description or README; their
+        # module docstring (and failing that, their manual page) is the only
+        # prose that ships with them. Shared by the list and detail paths so
+        # both show the same text.
+        if _positron_is_stdlib_path(package_path)
+            name = basename(String(package_path))
+            description = _positron_stdlib_module_docstring(package_path, name)
+            isempty(description) || return description
+            return _positron_first_markdown_paragraph(
+                joinpath(package_path, "docs", "src", "index.md"),
+            )
+        end
+        return ""
     end
 end
 
@@ -303,8 +323,15 @@ function _positron_list_packages(direct_only::Bool=true)
         # may have nothing, so guard against string(nothing) == "nothing".
         version_val = package_info.version
         version = version_val === nothing ? "" : string(version_val)
-        description = _positron_read_package_description(_positron_package_source_path(package_info))
+        package_path = _positron_package_source_path(package_info)
+        stdlib = _positron_is_stdlib_path(package_path)
+        description = _positron_read_package_description(package_path)
         url = _positron_package_url(package_info)
+        # Standard library packages are not in any registry; link to their
+        # manual section so the row still gets an external-link button.
+        if stdlib && isempty(url)
+            url = _positron_stdlib_docs_url(name)
+        end
         push!(packages, (
             id = isempty(version) ? name : "$(name)-$(version)",
             name = name,
@@ -313,6 +340,7 @@ function _positron_list_packages(direct_only::Bool=true)
             attached = name in explicitly_loaded,
             description = description,
             url = url,
+            stdlib = stdlib,
         ))
     end
     sort!(packages, by = package -> lowercase(package.name))
@@ -428,6 +456,7 @@ function _positron_search_packages(query::String)
             attached = false,
             description = "",
             url = get(by_url, name, ""),
+            stdlib = false,
         ))
     end
     sort!(packages, by = package -> lowercase(package.name))
@@ -573,6 +602,395 @@ function _positron_package_metadata(names::Vector{String})
     end
 
     _positron_print_json_metadata(by_name)
+end
+
+"""
+Given top-level module/package names referenced in user code, print the JSON
+array of names that are (a) not currently loadable via `Base.identify_package`
+(i.e. not a stdlib and not a dependency of the active project) AND (b) present
+by exact name in a reachable registry (i.e. actually installable). Matches the
+"referenced, not installed, installable" contract of Positron's
+listMissingPackages hook: never offer to install an unresolvable name.
+"""
+function _positron_missing_packages(names::Vector{String})
+    candidates = Set{String}()
+    for raw in names
+        cleaned = String(strip(raw))
+        isempty(cleaned) && continue
+        # Loadable already (stdlib or active-project dep) -> not missing.
+        Base.identify_package(cleaned) === nothing || continue
+        push!(candidates, cleaned)
+    end
+
+    installable = String[]
+    if !isempty(candidates)
+        for registry in Pkg.Registry.reachable_registries()
+            for entry in values(registry.pkgs)
+                entry.name in candidates || continue
+                push!(installable, entry.name)
+                delete!(candidates, entry.name)
+            end
+            isempty(candidates) && break
+        end
+    end
+
+    _positron_print_json_string_array(sort!(installable))
+end
+
+"""
+Look up the installed dependency named `name` (case-insensitive exact match)
+in `Pkg.dependencies()`. Returns `nothing` when the package is not installed.
+"""
+function _positron_find_installed_package(name::AbstractString)
+    target = lowercase(strip(String(name)))
+    isempty(target) && return nothing
+    for package_info in values(Pkg.dependencies())
+        lowercase(package_info.name) == target && return package_info
+    end
+    return nothing
+end
+
+"""
+Whether a package source path lives inside Julia's standard library directory.
+Standard library packages ship with Julia, are not in any registry, and carry
+minimal Project.toml metadata, so several detail fields need dedicated
+fallbacks for them.
+"""
+function _positron_is_stdlib_path(package_path)::Bool
+    package_path isa AbstractString || return false
+    isempty(package_path) && return false
+    return startswith(String(package_path), Sys.STDLIB)
+end
+
+"""
+Manual URL for a standard library package, e.g.
+https://docs.julialang.org/en/v1/stdlib/Dates/.
+"""
+function _positron_stdlib_docs_url(name::AbstractString)::String
+    return "https://docs.julialang.org/en/v1/stdlib/$(name)/"
+end
+
+"""
+Set of standard library UUIDs, used to exclude stdlibs from dependency
+counts (mirroring how R's detail RPC excludes base packages). Empty when the
+internal `Pkg.Types.stdlibs` API is unavailable.
+"""
+function _positron_stdlib_uuids()
+    return try
+        Set(keys(Pkg.Types.stdlibs()))
+    catch
+        Set{Base.UUID}()
+    end
+end
+
+"""
+Count a package's direct dependencies, excluding standard libraries.
+"""
+function _positron_dependency_count(package_info)::Int
+    hasproperty(package_info, :dependencies) || return 0
+    deps = package_info.dependencies
+    deps isa AbstractDict || return 0
+    stdlib_uuids = _positron_stdlib_uuids()
+    return count(uuid -> !(uuid in stdlib_uuids), values(deps))
+end
+
+"""
+Extract the first prose paragraph from a markdown file, using the same
+skip rules as the README description reader (headings, fences, badges,
+directive blocks are ignored). Returns "" when the file is missing or has
+no usable paragraph. Used for stdlib docs/src/index.md, which is the only
+prose description that ships with a standard library package.
+"""
+function _positron_first_markdown_paragraph(path::AbstractString)::String
+    isfile(path) || return ""
+    lines = try
+        readlines(path)
+    catch
+        return ""
+    end
+
+    paragraph = String[]
+    in_fence = false
+    for raw in Iterators.take(lines, 160)
+        line = strip(raw)
+        if startswith(line, "```") || startswith(line, "~~~")
+            in_fence = !in_fence
+            continue
+        end
+        in_fence && continue
+
+        if isempty(line)
+            isempty(paragraph) || break
+            continue
+        end
+
+        if _positron_skip_readme_line(line)
+            isempty(paragraph) || break
+            continue
+        end
+
+        text = _positron_markdown_text(line)
+        isempty(text) || push!(paragraph, text)
+    end
+
+    return _positron_collapse_whitespace(join(paragraph, " "))
+end
+
+"""
+Extract the first prose paragraph of the module docstring at the top of a
+package's `src/<name>.jl`. Standard library sources open with a triple-quoted
+docstring right above `module <Name>`; some start it with an indented
+signature line (e.g. `    Dates`), which is skipped along with fenced code.
+Returns "" when the file is missing or does not start with a docstring.
+"""
+function _positron_stdlib_module_docstring(
+    package_path::AbstractString,
+    name::AbstractString,
+)::String
+    source_path = joinpath(package_path, "src", "$(name).jl")
+    isfile(source_path) || return ""
+    lines = try
+        collect(Iterators.take(eachline(source_path), 60))
+    catch
+        return ""
+    end
+
+    # Find the opening docstring, skipping comments and blank lines. Any
+    # other code first means there is no module docstring.
+    index = 1
+    while index <= length(lines)
+        line = strip(lines[index])
+        if isempty(line) || startswith(line, "#")
+            index += 1
+        else
+            break
+        end
+    end
+    index > length(lines) && return ""
+    opening = strip(lines[index])
+    startswith(opening, "\"\"\"") || return ""
+
+    # Collect the docstring body until the closing triple quote.
+    body = String[]
+    remainder = strip(opening[4:end])
+    if endswith(remainder, "\"\"\"") && length(remainder) >= 3
+        # One-line docstring: """text"""
+        push!(body, strip(remainder[1:end-3]))
+    else
+        isempty(remainder) || push!(body, remainder)
+        index += 1
+        while index <= length(lines)
+            line = lines[index]
+            occursin("\"\"\"", line) && break
+            push!(body, line)
+            index += 1
+        end
+    end
+
+    # First prose paragraph: skip leading blanks and the indented signature
+    # line; stop at the first blank line or fenced code block.
+    paragraph = String[]
+    for raw in body
+        stripped = strip(raw)
+        startswith(stripped, "```") && break
+        if isempty(paragraph)
+            isempty(stripped) && continue
+            # Indented line before any prose is the signature (e.g. "    Dates").
+            startswith(raw, "    ") && continue
+        elseif isempty(stripped)
+            break
+        end
+        text = _positron_markdown_text(stripped)
+        isempty(text) || push!(paragraph, text)
+    end
+
+    return _positron_collapse_whitespace(join(paragraph, " "))
+end
+
+"""
+Return the first sentence of `text` (through the first period followed by
+whitespace), or the whole text when no sentence boundary is found. Used to
+turn a long docs paragraph into a one-line title.
+"""
+function _positron_first_sentence(text::AbstractString)::String
+    m = match(r"^(.+?\.)\s", text)
+    return m === nothing ? String(text) : String(m.captures[1])
+end
+
+"""
+Detect a license label from license file text. Matches the common license
+families used by Julia packages; returns "" when nothing matches.
+"""
+function _positron_detect_license_text(text::AbstractString)::String
+    occursin(r"\bMIT\b"i, text) && return "MIT"
+    if occursin(r"Apache License"i, text)
+        return occursin(r"Version 2\.0"i, text) ? "Apache-2.0" : "Apache"
+    end
+    if occursin(r"GNU (Lesser|Library) General Public License"i, text)
+        occursin(r"Version 3"i, text) && return "LGPL-3.0"
+        occursin(r"Version 2\.1"i, text) && return "LGPL-2.1"
+        return "LGPL"
+    end
+    if occursin(r"GNU Affero General Public License"i, text)
+        return "AGPL-3.0"
+    end
+    if occursin(r"GNU General Public License"i, text)
+        occursin(r"Version 3"i, text) && return "GPL-3.0"
+        occursin(r"Version 2"i, text) && return "GPL-2.0"
+        return "GPL"
+    end
+    occursin(r"BSD 3-Clause"i, text) && return "BSD-3-Clause"
+    occursin(r"BSD 2-Clause"i, text) && return "BSD-2-Clause"
+    if occursin(r"Mozilla Public License"i, text)
+        return occursin(r"2\.0", text) ? "MPL-2.0" : "MPL"
+    end
+    occursin(r"ISC License"i, text) && return "ISC"
+    occursin(r"Boost Software License"i, text) && return "BSL-1.0"
+    occursin(r"The Unlicense"i, text) && return "Unlicense"
+    occursin(r"European Union Public Licen"i, text) && return "EUPL"
+    # BSD text without a clause label: identify by its distinctive clause.
+    if occursin(r"Redistribution and use in source and binary forms"i, text)
+        return "BSD"
+    end
+    return ""
+end
+
+"""
+Detect a package's license from a license file in its source directory.
+Julia packages rarely declare `license` in Project.toml, but almost always
+ship a LICENSE/LICENSE.md file whose first lines name the license. Cached
+per path; returns "" when no license file is found or recognized.
+"""
+function _positron_read_license_file(package_path)::String
+    package_path isa AbstractString || return ""
+    isempty(package_path) && return ""
+    return get!(_POSITRON_LICENSE_BY_PATH, String(package_path)) do
+        for filename in (
+            "LICENSE", "LICENSE.md", "LICENSE.txt", "LICENSE.rst",
+            "License.md", "license", "COPYING", "COPYING.md",
+        )
+            license_path = joinpath(package_path, filename)
+            isfile(license_path) || continue
+            text = try
+                join(Iterators.take(eachline(license_path), 60), "\n")
+            catch
+                continue
+            end
+            label = _positron_detect_license_text(text)
+            isempty(label) || return label
+        end
+        return ""
+    end
+end
+
+"""
+Read and format the `authors` field from Project.toml/JuliaProject.toml for
+display: skips "contributors: ..." entries, strips trailing `<email>`
+addresses, and joins the remaining names with ", ". Returns "" when the
+field is absent or empty.
+"""
+function _positron_read_project_author(package_path)::String
+    package_path isa AbstractString || return ""
+    isempty(package_path) && return ""
+    return get!(_POSITRON_PROJECT_AUTHOR_BY_PATH, String(package_path)) do
+        for filename in ("Project.toml", "JuliaProject.toml")
+            project_path = joinpath(package_path, filename)
+            isfile(project_path) || continue
+            parsed = try
+                TOML.parsefile(project_path)
+            catch err
+                @debug "Failed to parse package author TOML" path=project_path exception=err
+                continue
+            end
+            raw = get(parsed, "authors", nothing)
+            raw isa Vector || return ""
+            author_names = String[]
+            for entry in raw
+                entry isa AbstractString || continue
+                text = strip(entry)
+                isempty(text) && continue
+                occursin(r"^contributors\s*:"i, text) && continue
+                text = strip(replace(text, r"\s*<[^<>]*>\s*$" => ""))
+                isempty(text) || push!(author_names, String(text))
+            end
+            return join(author_names, ", ")
+        end
+        return ""
+    end
+end
+
+"""
+Return the name of the reachable registry (e.g. "General") that contains
+`package_name`, or "" when it is not found in any reachable registry. The
+Julia analog of R's "CRAN" for the detail editor's source repository field.
+"""
+function _positron_registry_name_for_package(package_name::AbstractString)::String
+    target = lowercase(strip(String(package_name)))
+    isempty(target) && return ""
+    for registry in Pkg.Registry.reachable_registries()
+        for entry in values(registry.pkgs)
+            lowercase(entry.name) == target && return registry.name
+        end
+    end
+    return ""
+end
+
+"""
+Print detail fields for a single installed package as one JSON object, or
+`null` when the package is not installed. Called when the package detail
+editor opens; the result is merged over the package's list entry.
+
+The `stdlib` key is internal to the extension (used to suppress the
+juliapackages.com description overlay, which has stale entries for
+pre-stdlib packages like Dates.jl) and is not forwarded to Positron.
+"""
+function _positron_package_detail(name::String)
+    package_info = _positron_find_installed_package(name)
+    if package_info === nothing
+        print("null")
+        return
+    end
+
+    version_val = package_info.version
+    version = version_val === nothing ? "" : string(version_val)
+    package_path = _positron_package_source_path(package_info)
+    stdlib = _positron_is_stdlib_path(package_path)
+
+    # Project.toml's `description` is a one-liner by convention: use it as the
+    # detail header's title, and the longer README paragraph as description.
+    title, license, url = _positron_read_project_metadata(package_path)
+    description = _positron_read_package_description(package_path)
+    author = _positron_read_project_author(package_path)
+    dependency_count = _positron_dependency_count(package_info)
+
+    if stdlib
+        # Standard libraries ship minimal Project.toml metadata: no authors,
+        # license, URL, or registry entry. They are part of Julia itself
+        # (MIT-licensed) and documented in the Julia manual; the description
+        # reader falls back to their module docstring / manual page.
+        isempty(title) && (title = _positron_first_sentence(description))
+        isempty(license) && (license = "MIT")
+        isempty(url) && (url = _positron_stdlib_docs_url(package_info.name))
+        source_repository = "Julia standard library"
+    else
+        isempty(license) && (license = _positron_read_license_file(package_path))
+        isempty(url) && (url = _positron_package_source_url(package_info))
+        isempty(url) && (url = _positron_registry_package_url(package_info.name))
+        source_repository = _positron_registry_name_for_package(package_info.name)
+    end
+
+    print("{")
+    print("\"name\":", _positron_json_string(package_info.name))
+    isempty(version) || print(",\"version\":", _positron_json_string(version))
+    isempty(title) || print(",\"title\":", _positron_json_string(title))
+    isempty(author) || print(",\"author\":", _positron_json_string(author))
+    isempty(license) || print(",\"license\":", _positron_json_string(license))
+    isempty(source_repository) || print(",\"sourceRepository\":", _positron_json_string(source_repository))
+    isempty(description) || print(",\"description\":", _positron_json_string(description))
+    isempty(url) || print(",\"url\":", _positron_json_string(url))
+    print(",\"dependencyCount\":", dependency_count)
+    stdlib && print(",\"stdlib\":true")
+    print("}")
 end
 
 function _positron_search_package_versions(name::String)

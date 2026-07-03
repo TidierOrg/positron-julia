@@ -13,6 +13,7 @@ import {
   JupyterKernelSpec,
 } from "./positron-supervisor";
 import { JuliaPackageManager } from "./packages";
+import { listMissingJuliaPackages } from "./missingPackages";
 
 interface RuntimeResourceUsage {
   [key: string]: unknown;
@@ -479,6 +480,13 @@ export class JuliaSession
 
   getPackageManager(): positron.LanguageRuntimePackageManager {
     return this._packageManager;
+  }
+
+  async listMissingPackages(
+    target: positron.RuntimeMissingPackagesTarget,
+    token?: vscode.CancellationToken,
+  ): Promise<positron.RuntimeMissingPackage[]> {
+    return listMissingJuliaPackages(this._packageManager, target, token);
   }
 
   updateSessionName(name: string): void {

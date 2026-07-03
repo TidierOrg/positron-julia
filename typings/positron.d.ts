@@ -1235,6 +1235,47 @@ declare module 'positron' {
 		 * package management (e.g. to power the Packages pane).
 		 */
 		getPackageManager?(): LanguageRuntimePackageManager;
+
+		/**
+		 * Statically analyze code (or a file) and return packages that are
+		 * referenced but NOT installed AND that can be installed in this
+		 * session's environment.
+		 *
+		 * MUST NOT return packages that cannot be resolved/installed (e.g.
+		 * GitHub-only R packages, unknown PyPI names). SHOULD be fast and cache
+		 * internally; callers will not block UI on it.
+		 *
+		 * @param target The code or file to analyze.
+		 * @param token Optional cancellation token.
+		 */
+		listMissingPackages?(target: RuntimeMissingPackagesTarget, token?: vscode.CancellationToken): Thenable<RuntimeMissingPackage[]>;
+	}
+
+	/**
+	 * Describes a package that is referenced by code but not installed in a
+	 * session's environment, and that the session knows how to install.
+	 */
+	export interface RuntimeMissingPackage {
+		/** Name to pass to installPackages (the installable/repository name). */
+		readonly name: string;
+
+		/**
+		 * The symbol as referenced in code, when it differs from `name` (e.g.
+		 * python import `cv2` -> install `opencv-python`). Used for display only.
+		 */
+		readonly referencedName?: string;
+	}
+
+	/**
+	 * Describes the code to analyze for missing packages. Callers supply either
+	 * raw code or the URI of a saved file (not both).
+	 */
+	export interface RuntimeMissingPackagesTarget {
+		/** Raw code to analyze (notebook cells, quarto chunks, unsaved buffers). */
+		readonly code?: string;
+
+		/** URI of a saved file to analyze. The runtime may read/parse it directly. */
+		readonly uri?: string;
 	}
 
 	/**
@@ -1268,6 +1309,15 @@ declare module 'positron' {
 		description?: string;
 		/** Optional package website, repository, or documentation URL. */
 		url?: string;
+
+		/** One-line title/summary, richer than `description`. From the detail RPC. */
+		title?: string;
+
+		/** Display-ready author/maintainer string (already normalized by the runtime). */
+		author?: string;
+
+		/** Source repository label or URL (e.g. "CRAN", or a Project-URL). */
+		sourceRepository?: string;
 	}
 
 	/**
@@ -1302,6 +1352,18 @@ declare module 'positron' {
 			packageNames: string[],
 			token?: vscode.CancellationToken,
 		): Thenable<Map<string, Partial<LanguageRuntimePackage>>>;
+
+		/**
+		 * Fetch detailed metadata for a single package, called when the package
+		 * detail editor opens. Cheap, kernel-local fields only. Returns a partial
+		 * package to merge over the list entry, or undefined when unsupported.
+		 * @param name Package name
+		 * @param token Optional cancellation token
+		 */
+		getPackageDetail?(
+			name: string,
+			token?: vscode.CancellationToken,
+		): Thenable<Partial<LanguageRuntimePackage> | undefined>;
 
 		/**
 		 * Fired when the set of loaded/attached packages may have changed
