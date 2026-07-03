@@ -145,4 +145,54 @@ end
         parsed = JSON3.read(json, Dict{String, Any})
         @test isempty(parsed)
     end
+
+    @testset "Project Author Parsing" begin
+        empty!(_POSITRON_PROJECT_AUTHOR_BY_PATH)
+
+        mktempdir() do package_dir
+            write(
+                joinpath(package_dir, "Project.toml"),
+                """
+                name = "Example"
+                uuid = "22222222-2222-2222-2222-222222222222"
+                version = "1.0.0"
+                authors = ["Jane Doe <jane@example.com>", "contributors: https://example.com/contributors"]
+                """,
+            )
+
+            @test _positron_read_project_author(package_dir) == "Jane Doe"
+        end
+
+        empty!(_POSITRON_PROJECT_AUTHOR_BY_PATH)
+
+        mktempdir() do package_dir
+            write(
+                joinpath(package_dir, "Project.toml"),
+                """
+                name = "NoAuthors"
+                uuid = "33333333-3333-3333-3333-333333333333"
+                version = "1.0.0"
+                """,
+            )
+
+            @test _positron_read_project_author(package_dir) == ""
+        end
+    end
+
+    @testset "Package Detail" begin
+        json = _capture_package_helper_stdout() do
+            _positron_package_detail("JSON3")
+        end
+
+        parsed = JSON3.read(json, Dict{String, Any})
+        @test parsed["name"] == "JSON3"
+        @test haskey(parsed, "version")
+        @test occursin(r"^\d+\.\d+", parsed["version"])
+        @test parsed["sourceRepository"] == "General"
+
+        missing_json = _capture_package_helper_stdout() do
+            _positron_package_detail("ThisPackageDoesNotExist12345")
+        end
+        @test strip(missing_json) == "null"
+    end
 end

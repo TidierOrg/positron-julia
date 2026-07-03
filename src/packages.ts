@@ -337,6 +337,59 @@ export class JuliaPackageManager
     return metadataMap;
   }
 
+  async getPackageDetail(
+    name: string,
+    token?: vscode.CancellationToken,
+  ): Promise<Partial<positron.LanguageRuntimePackage> | undefined> {
+    const trimmed = name.trim();
+    if (trimmed.length === 0) {
+      return undefined;
+    }
+
+    await this.sourcePackagesScript();
+
+    const escaped = this._escapeJuliaStringLiteral(trimmed);
+    const raw = await this._executeAndCapture(
+      `_positron_package_detail("${escaped}")`,
+      positron.RuntimeCodeExecutionMode.Silent,
+      QUERY_TIMEOUT_MS,
+      token,
+    );
+
+    const parsed = this._parseJsonValue(raw);
+    // `null` means the package is not installed.
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const detail: Partial<positron.LanguageRuntimePackage> = {};
+    const copyString = (key: keyof positron.LanguageRuntimePackage) => {
+      const value = record[key];
+      if (typeof value === "string" && value.length > 0) {
+        (detail as Record<string, string>)[key] = value;
+      }
+    };
+    copyString("name");
+    copyString("version");
+    copyString("author");
+    copyString("license");
+    copyString("sourceRepository");
+    copyString("description");
+    copyString("url");
+
+    // Prefer the curated juliapackages.com description, matching the
+    // getPackages()/getPackageMetadata() behavior so the detail editor
+    // shows the same summary as the list entry.
+    const juliaPackagesDescription =
+      await this._getJuliaPackagesDescriptionCached(trimmed);
+    if (juliaPackagesDescription) {
+      detail.description = juliaPackagesDescription;
+    }
+
+    return detail;
+  }
+
   private _getJuliaPackagesDescriptionCached(
     packageName: string,
   ): Promise<string | undefined> {

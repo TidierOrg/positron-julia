@@ -27,6 +27,7 @@ const _POSITRON_REGISTRY_URL_BY_NAME = Dict{String, String}()
 # Cache of latest registry version keyed by lowercase package name. Populated
 # during metadata fetches so subsequent calls skip the full registry scan.
 const _POSITRON_REGISTRY_LATEST_VERSION_BY_NAME = Dict{String, String}()
+const _POSITRON_PROJECT_AUTHOR_BY_PATH = Dict{String, String}()
 
 function _positron_json_string(value::AbstractString)::String
     return "\"" * escape_string(value) * "\""
@@ -573,6 +574,104 @@ function _positron_package_metadata(names::Vector{String})
     end
 
     _positron_print_json_metadata(by_name)
+end
+
+"""
+Look up the installed dependency named `name` (case-insensitive exact match)
+in `Pkg.dependencies()`. Returns `nothing` when the package is not installed.
+"""
+function _positron_find_installed_package(name::AbstractString)
+    target = lowercase(strip(String(name)))
+    isempty(target) && return nothing
+    for package_info in values(Pkg.dependencies())
+        lowercase(package_info.name) == target && return package_info
+    end
+    return nothing
+end
+
+"""
+Read and format the `authors` field from Project.toml/JuliaProject.toml for
+display: skips "contributors: ..." entries, strips trailing `<email>`
+addresses, and joins the remaining names with ", ". Returns "" when the
+field is absent or empty.
+"""
+function _positron_read_project_author(package_path)::String
+    package_path isa AbstractString || return ""
+    isempty(package_path) && return ""
+    return get!(_POSITRON_PROJECT_AUTHOR_BY_PATH, String(package_path)) do
+        for filename in ("Project.toml", "JuliaProject.toml")
+            project_path = joinpath(package_path, filename)
+            isfile(project_path) || continue
+            parsed = try
+                TOML.parsefile(project_path)
+            catch err
+                @debug "Failed to parse package author TOML" path=project_path exception=err
+                continue
+            end
+            raw = get(parsed, "authors", nothing)
+            raw isa Vector || return ""
+            author_names = String[]
+            for entry in raw
+                entry isa AbstractString || continue
+                text = strip(entry)
+                isempty(text) && continue
+                occursin(r"^contributors\s*:"i, text) && continue
+                text = strip(replace(text, r"\s*<[^<>]*>\s*$" => ""))
+                isempty(text) || push!(author_names, String(text))
+            end
+            return join(author_names, ", ")
+        end
+        return ""
+    end
+end
+
+"""
+Return the name of the reachable registry (e.g. "General") that contains
+`package_name`, or "" when it is not found in any reachable registry. The
+Julia analog of R's "CRAN" for the detail editor's source repository field.
+"""
+function _positron_registry_name_for_package(package_name::AbstractString)::String
+    target = lowercase(strip(String(package_name)))
+    isempty(target) && return ""
+    for registry in Pkg.Registry.reachable_registries()
+        for entry in values(registry.pkgs)
+            lowercase(entry.name) == target && return registry.name
+        end
+    end
+    return ""
+end
+
+"""
+Print detail fields for a single installed package as one JSON object, or
+`null` when the package is not installed. Called when the package detail
+editor opens; the result is merged over the package's list entry.
+"""
+function _positron_package_detail(name::String)
+    package_info = _positron_find_installed_package(name)
+    if package_info === nothing
+        print("null")
+        return
+    end
+
+    version_val = package_info.version
+    version = version_val === nothing ? "" : string(version_val)
+    package_path = _positron_package_source_path(package_info)
+    description, license, url = _positron_read_project_metadata(package_path)
+    isempty(description) && (description = _positron_read_package_description(package_path))
+    isempty(url) && (url = _positron_package_source_url(package_info))
+    isempty(url) && (url = _positron_registry_package_url(package_info.name))
+    author = _positron_read_project_author(package_path)
+    source_repository = _positron_registry_name_for_package(package_info.name)
+
+    print("{")
+    print("\"name\":", _positron_json_string(package_info.name))
+    isempty(version) || print(",\"version\":", _positron_json_string(version))
+    isempty(author) || print(",\"author\":", _positron_json_string(author))
+    isempty(license) || print(",\"license\":", _positron_json_string(license))
+    isempty(source_repository) || print(",\"sourceRepository\":", _positron_json_string(source_repository))
+    isempty(description) || print(",\"description\":", _positron_json_string(description))
+    isempty(url) || print(",\"url\":", _positron_json_string(url))
+    print("}")
 end
 
 function _positron_search_package_versions(name::String)
