@@ -169,6 +169,14 @@ function getKernelStartupCode(): string {
 				isfile(joinpath(user_project, "JuliaProject.toml"))
 			)
 				Pkg.activate(user_project)
+			else
+				# No valid workspace project: activate() with no arguments
+				# toggles back to whatever was active before the bundled
+				# Positron.jl activation above (the user's default global
+				# environment, e.g. @v1.12). Without this, the console and
+				# Pkg REPL mode would stay pinned to the extension's own
+				# internal project forever.
+				Pkg.activate()
 			end
 		end;
 		IJulia.run_kernel();
