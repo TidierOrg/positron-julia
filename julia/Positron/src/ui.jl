@@ -35,6 +35,10 @@ function init!(service::UIService, comm::PositronComm)
 
     on_msg!(comm, msg -> handle_ui_msg(service, msg))
     on_close!(comm, () -> handle_ui_close(service))
+
+    # The frontend keeps the console's prompt state across kernel restarts;
+    # make sure a fresh kernel never starts behind a stale `pkg>` prompt.
+    set_console_prompts!(service, JULIA_INPUT_PROMPT, JULIA_CONTINUATION_PROMPT)
 end
 
 """
@@ -287,6 +291,25 @@ function poll_working_directory!(service::UIService)
     params = UiWorkingDirectoryParams(alias_home(current_dir))
     send_event(service.comm, "working_directory", params)
     kernel_log_info("Sent working_directory event: $(params.directory)")
+end
+
+"""
+Update the console's input and continuation prompts (e.g. when entering or
+leaving Pkg REPL mode). No-op when the UI comm is not connected.
+"""
+function set_console_prompts!(
+    service::UIService,
+    input_prompt::String,
+    continuation_prompt::String,
+)
+    if service.comm === nothing
+        kernel_log_warn("UI comm not initialized, cannot update console prompts")
+        return
+    end
+
+    params = UiPromptStateParams(input_prompt, continuation_prompt)
+    send_event(service.comm, "prompt_state", params)
+    kernel_log_info("Sent prompt_state event: $(input_prompt)")
 end
 
 """

@@ -735,6 +735,11 @@ This implementation uses Meta.parseall which correctly handles multiple expressi
 and checks if any of them are incomplete.
 """
 function check_code_complete(code::String)
+    # In Pkg REPL mode every submission is a single Pkg command line.
+    if PKG_REPL_MODE[]
+        return "complete"
+    end
+
     # REPL special-mode one-liners (`] add X`, `?foo`, `;ls`) never parse as
     # valid Julia syntax, so without this check the console would report them
     # as invalid input. They execute through IJulia's special modes (and our
@@ -801,21 +806,31 @@ function install_is_complete_handler!()
     kernel_log_info("Installed custom is_complete_request handler")
 end
 
-"""
-Message printed when the user tries to enter the interactive Pkg REPL with a
-bare `]`. A Jupyter-based console has no modal prompt, so instead of silently
-doing nothing (issue #35), explain the supported one-line form.
-"""
-const PKG_REPL_GUIDANCE = """
-The interactive Pkg REPL (pkg>) is not available in Positron's console.
-Run Pkg commands on a single line instead:
+# -------------------------------------------------------------------------
+# Pkg REPL mode
+# -------------------------------------------------------------------------
+# Forked from julia-vscode's REPL integration, where a LineEdit keymap bound
+# to `]` transitions the terminal REPL into Pkg.REPLMode. A Jupyter-based
+# console never sees raw keystrokes, so the transition happens on submission
+# instead: a bare `]` enters the mode, Positron's `prompt_state` UI event
+# switches the console prompt to the environment-aware `pkg>`, and every
+# subsequent submission runs as a Pkg REPL command until the user leaves the
+# mode (issue #35).
 
-  ] status              # show installed packages
-  ] add DataFrames      # install a package
-  ] help                # list all Pkg commands
+# Default console prompts. Keep in sync with the session dynState in the
+# extension's src/session.ts.
+const JULIA_INPUT_PROMPT = "julia>"
+const JULIA_CONTINUATION_PROMPT = "      "
 
-Or call the Pkg API directly, e.g. import Pkg; Pkg.add("DataFrames").
 """
+Whether the console is currently in Pkg REPL mode.
+"""
+const PKG_REPL_MODE = Ref(false)
+
+# The terminal REPL leaves Pkg mode via the Backspace/Ctrl-C keystrokes,
+# which never reach a Jupyter kernel; these commands are the console
+# equivalent (none of them is a valid Pkg REPL command).
+const PKG_REPL_EXIT_COMMANDS = ("back", "exit", "quit")
 
 """
 Extract the Pkg REPL command from Pkg-mode console input (a single line
@@ -827,6 +842,98 @@ function extract_pkg_repl_command(code::AbstractString)::Union{String,Nothing}
     startswith(stripped, ']') || return nothing
     occursin('\n', stripped) && return nothing
     return String(strip(chop(stripped; head = 1, tail = 0)))
+end
+
+"""
+Environment-aware Pkg prompt, mirroring the terminal REPL's `(@v1.12) pkg>`
+and `(MyProject) pkg>`. Derived directly from the active project because
+`Pkg.REPLMode.promptf` lives in Pkg's REPL extension, which is not loaded in
+a Jupyter kernel.
+"""
+function pkg_repl_prompt()::String
+    label = try
+        project_file = Base.active_project()
+        if project_file === nothing
+            ""
+        else
+            in_shared_env = any(Base.DEPOT_PATH) do depot
+                startswith(project_file, joinpath(depot, "environments"))
+            end
+            name = basename(dirname(project_file))
+            in_shared_env ? "@" * name : name
+        end
+    catch
+        ""
+    end
+    return isempty(label) ? "pkg>" : "($label) pkg>"
+end
+
+"""
+Push the console prompts matching the current mode to the frontend.
+"""
+function update_console_prompts!()
+    kernel = get_kernel()
+    kernel.started || return
+    if PKG_REPL_MODE[]
+        prompt = pkg_repl_prompt()
+        set_console_prompts!(kernel.ui, prompt, " "^textwidth(prompt))
+    else
+        set_console_prompts!(kernel.ui, JULIA_INPUT_PROMPT, JULIA_CONTINUATION_PROMPT)
+    end
+end
+
+function enter_pkg_repl_mode!()
+    PKG_REPL_MODE[] = true
+    update_console_prompts!()
+    println(
+        "Entered Pkg REPL mode. Run commands like `status` or `add DataFrames`; " *
+        "type `back` or `exit` to return to the julia> prompt.",
+    )
+end
+
+function exit_pkg_repl_mode!()
+    PKG_REPL_MODE[] = false
+    update_console_prompts!()
+end
+
+"""
+Run a Pkg REPL command string (e.g. "add DataFrames") the way the terminal
+Pkg REPL would, writing output to the kernel's captured stdout. Reuses
+IJulia's version-aware bridge, which also lazy-loads Pkg.
+"""
+function run_pkg_repl_command(command::AbstractString)
+    IJulia.do_pkg_cmd(String(command))
+    return nothing
+end
+
+"""
+Whether the submitted code is one of the extension's own non-silent
+executions (package-pane mutations like install/update run as Interactive so
+their Pkg output shows in the console). These must run as normal Julia even
+while the console sits in Pkg REPL mode.
+"""
+function is_extension_internal_code(code::AbstractString)::Bool
+    return startswith(strip(code), "_PositronPackages.")
+end
+
+"""
+Handle console input while Pkg REPL mode is active: exit commands leave the
+mode, a leading `]` is tolerated (and stripped), an empty line stays in the
+mode like the terminal REPL, and anything else runs as a Pkg REPL command.
+"""
+function execute_pkg_mode_request(ijulia_kernel, msg)
+    input = strip(msg.content["code"]::String)
+    command = startswith(input, ']') ? strip(chop(input; head = 1, tail = 0)) : input
+
+    if lowercase(String(command)) in PKG_REPL_EXIT_COMMANDS
+        return execute_positron_action(ijulia_kernel, msg) do
+            exit_pkg_repl_mode!()
+        end
+    end
+
+    return execute_positron_action(ijulia_kernel, msg) do
+        isempty(command) || run_pkg_repl_command(String(command))
+    end
 end
 
 """
@@ -848,19 +955,30 @@ function install_execute_request_handler!()
 
     IJulia.handlers["execute_request"] = function (socket, ijulia_kernel, msg)
         code = msg.content["code"]::String
+        silent = msg.content["silent"]::Bool
+
+        # Background executions from the extension (silent package-pane
+        # queries, Interactive install/update mutations) are never console
+        # REPL-mode input.
+        if silent || is_extension_internal_code(code)
+            return original_execute_request(socket, ijulia_kernel, msg)
+        end
+
+        if PKG_REPL_MODE[]
+            return execute_pkg_mode_request(ijulia_kernel, msg)
+        end
 
         pkg_command = extract_pkg_repl_command(code)
         if pkg_command !== nothing
             if isempty(pkg_command)
-                # Bare `]`: IJulia would run an empty Pkg command and produce
-                # no output at all. Print guidance instead so the input
-                # visibly does something.
+                # Bare `]`: switch the console into Pkg REPL mode, like the
+                # terminal REPL's `]` keybinding.
                 return execute_positron_action(ijulia_kernel, msg) do
-                    print(PKG_REPL_GUIDANCE)
+                    enter_pkg_repl_mode!()
                 end
             end
 
-            # One-line commands (`] add Foo`) are handled by IJulia's own
+            # One-shot commands (`] add Foo`) are handled by IJulia's own
             # execute path; normalize surrounding whitespace so its `^\\]`
             # match always fires.
             msg.content["code"] = String(strip(code))

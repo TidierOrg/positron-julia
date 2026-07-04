@@ -21,7 +21,8 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 - **Variables Pane** — Browse all session variables with type and value summaries.
 - **Help Integration** — View Julia documentation inline via Positron's Help pane.
 - **Plots** — Julia plots are captured and displayed in Positron's Plots pane.
-- **Package Pane** — Browse and manage Julia packages directly within Positron. One-line Pkg commands (`] add DataFrames`, `] status`) work in the console.
+- **Package Pane** — Browse and manage Julia packages directly within Positron.
+- **Pkg REPL Mode** — Type `]` in the console to switch to the `pkg>` prompt, run Pkg commands like `status` or `add DataFrames`, and type `back` (or `exit`) to return to `julia>`. One-shot commands (`] add DataFrames`) work too.
 - **Create New Package** — Scaffold a new package with [PkgTemplates.jl](https://github.com/JuliaCI/PkgTemplates.jl) via `Julia: Create New Package` in the command palette: tests and README always included, plus optional git repository, MIT license, GitHub Actions CI, and Documenter docs.
 - **TestItem Compatible** - Uses the same testing system as `julia-vscode`
 - **Debugger** - Use breakpoints, inspect local and global variables, etc.

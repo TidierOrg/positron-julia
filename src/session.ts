@@ -84,6 +84,9 @@ export class JuliaSession
     this.dynState = {
       // Do not put ANSI here. Positron's inputPrompt renderer currently
       // displays ANSI escape sequences literally.
+      // Keep in sync with JULIA_INPUT_PROMPT/JULIA_CONTINUATION_PROMPT in
+      // julia/Positron/src/kernel.jl, which restores these prompts when the
+      // console leaves Pkg REPL mode.
       inputPrompt: "julia>",
       continuationPrompt: "      ",
       sessionName: sessionName || runtimeMetadata.runtimeName,
