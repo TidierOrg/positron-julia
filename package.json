@@ -35,6 +35,7 @@
     "onLanguageRuntime:julia",
     "onLanguage:julia",
     "onCommand:julia.createNewFile",
+    "onCommand:julia.createNewPackage",
     "onCommand:julia.selectInterpreter",
     "onCommand:julia.runFile",
     "onCommand:julia.runSelection",
@@ -122,6 +123,11 @@
         "command": "julia.createNewFile",
         "category": "Julia",
         "title": "New Julia File"
+      },
+      {
+        "command": "julia.createNewPackage",
+        "category": "Julia",
+        "title": "Create New Package"
       },
       {
         "command": "julia.selectInterpreter",

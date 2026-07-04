@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import * as positron from "positron";
 
 import { JuliaRuntimeManager } from "./runtime-manager";
+import { createNewPackage } from "./create-package";
 import { LOGGER, getLanguageClient, restartLanguageServer } from "./extension";
 
 const JULIA_LANGUAGE_ID = "julia";
@@ -142,6 +143,18 @@ export function registerCommands(
         content: "",
       });
       await vscode.window.showTextDocument(document);
+    }),
+  );
+
+  // Create a new Julia package scaffold with PkgTemplates (issue #31)
+  context.subscriptions.push(
+    vscode.commands.registerCommand("julia.createNewPackage", async () => {
+      try {
+        await createNewPackage(context, runtimeManager);
+      } catch (error) {
+        LOGGER.error(`Failed to create Julia package: ${error}`);
+        vscode.window.showErrorMessage("Failed to create Julia package");
+      }
     }),
   );
 

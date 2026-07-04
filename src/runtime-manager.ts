@@ -43,6 +43,22 @@ export class JuliaRuntimeManager implements positron.LanguageRuntimeManager {
 		return undefined;
 	}
 
+	/**
+	 * Best Julia installation for auxiliary tooling (e.g. the create-package
+	 * command): the active session's installation, else the first discovered
+	 * one.
+	 */
+	getPreferredInstallation(): JuliaInstallation | undefined {
+		const session = this.getActiveJuliaSession();
+		if (session) {
+			return session.installation;
+		}
+		for (const installation of this._installations.values()) {
+			return installation;
+		}
+		return undefined;
+	}
+
 	/** Recommended runtime for the current workspace */
 	private _recommendedRuntime: positron.LanguageRuntimeMetadata | undefined;
 
