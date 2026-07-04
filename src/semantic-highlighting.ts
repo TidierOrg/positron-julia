@@ -223,7 +223,7 @@ export class JuliaSemanticTokensProvider implements vscode.DocumentSemanticToken
 		const config = vscode.workspace.getConfiguration('positron.julia');
 		const enabled = config.get<boolean>('semanticHighlighting.enabled', true);
 		const stringSemanticEnabled = config.get<boolean>('semanticHighlighting.string.enabled', false);
-		if (!enabled) {
+		if (!enabled || isQuartoVirtualDocument(document)) {
 			return new vscode.SemanticTokens(new Uint32Array());
 		}
 
@@ -240,12 +240,17 @@ export class JuliaSemanticTokensProvider implements vscode.DocumentSemanticToken
 			}
 
 			const text = document.lineAt(line).text;
+			// Comments are deliberately not emitted as semantic tokens: the TextMate
+			// grammar already colors them, and comment tokens bleed into host
+			// documents (e.g. Quarto .qmd) whose virtual .jl files pad non-Julia
+			// lines with "#". The protected ranges below still suppress false
+			// keyword/string/number tokens inside comments and strings.
 			const protectedRanges = computeProtectedRanges(text, scanState);
-			for (const range of protectedRanges) {
-				if (range.kind === 'comment') {
-					collector.add(line, range.start, range.end - range.start, 'comment', [], 100);
-				} else if (stringSemanticEnabled) {
-					collector.add(line, range.start, range.end - range.start, 'string', [], 100);
+			if (stringSemanticEnabled) {
+				for (const range of protectedRanges) {
+					if (range.kind === 'string') {
+						collector.add(line, range.start, range.end - range.start, 'string', [], 100);
+					}
 				}
 			}
 
@@ -548,6 +553,14 @@ function findMatchingParen(text: string, openIndex: number): number {
 		}
 	}
 	return -1;
+}
+
+// Quarto mirrors embedded {julia} cells into hidden ".vdoc*.jl" temp files and
+// maps any tokens we emit back onto the whole host document, so never tokenize
+// them (the host file keeps its own TextMate highlighting for cells).
+function isQuartoVirtualDocument(document: vscode.TextDocument): boolean {
+	const fileName = document.uri.path.split('/').pop() ?? '';
+	return fileName.startsWith('.vdoc');
 }
 
 function isRangeUnprotected(start: number, length: number, protectedRanges: ProtectedRange[]): boolean {

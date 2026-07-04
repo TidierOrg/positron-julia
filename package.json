@@ -2,7 +2,7 @@
   "name": "positron-julia",
   "displayName": "Julia for Positron",
   "description": "Julia language support for Positron IDE",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "ntluong95",
   "author": "TidierOrg, rdboyes, ntluong95",
   "contributors": [
@@ -46,6 +46,7 @@
     "onCommand:julia.changeCurrentEnvironment",
     "onCommand:julia.executeCell",
     "onCommand:julia.executeCellAndMove",
+    "onCommand:julia.executeQuartoCell",
     "onCommand:julia.enterPkgReplModeFromConsole",
     "onCommand:julia.exitPkgReplModeFromConsole",
     "onCommand:julia.stopTestProcess",
@@ -190,6 +191,11 @@
         "title": "Execute Code Cell and Move to Next"
       },
       {
+        "command": "julia.executeQuartoCell",
+        "category": "Julia",
+        "title": "Execute Quarto Cell in Document Session"
+      },
+      {
         "command": "julia.enterPkgReplModeFromConsole",
         "category": "Julia",
         "title": "Enter Pkg REPL Mode"
@@ -293,6 +299,25 @@
         "command": "julia.executeCellAndMove",
         "key": "alt+shift+enter",
         "when": "editorLangId == julia && editorTextFocus"
+      },
+      {
+        "command": "julia.executeQuartoCell",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "args": {
+          "scope": "statement"
+        },
+        "when": "editorTextFocus && editorLangId == quarto && !findInputFocussed && !replaceInputFocussed"
+      },
+      {
+        "command": "julia.executeQuartoCell",
+        "key": "ctrl+shift+enter",
+        "mac": "cmd+shift+enter",
+        "args": {
+          "scope": "cell",
+          "fallbackCommand": "quarto.runCurrentCell"
+        },
+        "when": "editorTextFocus && editorLangId == quarto && !findInputFocussed && !replaceInputFocussed"
       },
       {
         "command": "julia.enterPkgReplModeFromConsole",
