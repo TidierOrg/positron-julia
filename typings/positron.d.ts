@@ -1996,6 +1996,23 @@ declare module 'positron' {
 			sessionId?: string): Thenable<Record<string, any>>;
 
 		/**
+		 * Executes code cells of a document inline, in the session dedicated to
+		 * that document (e.g. a Quarto document's session). This is the same
+		 * execution path used by the inline-output cell "Run" button.
+		 *
+		 * Only available in Positron builds with per-document Quarto sessions
+		 * (2026.x+); check for its presence before calling.
+		 *
+		 * @param documentUri The URI of the document in which the cells reside
+		 * @param ranges The ranges of the cells to execute
+		 * @param executionMetadata Optional metadata to attach to the execution
+		 * @returns A promise that resolves when the request has been sent
+		 */
+		export function executeInlineCell(documentUri: vscode.Uri,
+			ranges: vscode.Range[],
+			executionMetadata?: Record<string, unknown>): Thenable<void>;
+
+		/**
 		 * Register a language runtime manager with Positron.
 		 *
 		 * @param languageId The language ID for which the manager can provide

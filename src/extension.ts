@@ -16,6 +16,7 @@ import { registerStatementRangeProvider } from './statement-range';
 import { registerSemanticTokensProvider } from './semantic-highlighting';
 import { registerHelpTopicProvider } from './help';
 import { registerCellCommands } from './cells';
+import { registerQuartoCellCommands } from './quarto-cells';
 import { JuliaEnvironmentManager } from './environment';
 import { TestFeature } from './testing/testFeature';
 import { notifyTypeTextDocumentPublishTests } from './testing/testLSProtocol';
@@ -100,6 +101,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Register code cell execution commands (# %% / ## delimiters)
 	registerCellCommands(context);
+
+	// Register Quarto cell execution (Cmd+Enter in .qmd julia cells runs in
+	// the document's dedicated Quarto session, like the cell Run button)
+	registerQuartoCellCommands(context);
 
 	// Environment status bar and switching
 	const environmentManager = new JuliaEnvironmentManager();
