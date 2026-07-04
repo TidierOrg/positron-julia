@@ -8,6 +8,29 @@ using Test
 
 include(normpath(joinpath(@__DIR__, "..", "..", "..", "scripts", "packages", "packages.jl")))
 
+# The script defines everything inside the `_PositronPackages` module so user
+# globals in `Main` cannot shadow the Base names it uses (issue #32). Bring
+# the tested helpers into scope explicitly.
+using ._PositronPackages:
+    _PositronPackage,
+    _POSITRON_DESCRIPTION_BY_PATH,
+    _POSITRON_LICENSE_BY_PATH,
+    _POSITRON_PROJECT_AUTHOR_BY_PATH,
+    _POSITRON_PROJECT_METADATA_BY_PATH,
+    _POSITRON_REGISTRY_LATEST_VERSION_BY_NAME,
+    _positron_detect_license_text,
+    _positron_missing_packages,
+    _positron_package_detail,
+    _positron_package_metadata,
+    _positron_print_json_packages,
+    _positron_read_license_file,
+    _positron_read_package_description,
+    _positron_read_project_author,
+    _positron_read_project_metadata,
+    _positron_registry_package_url,
+    _positron_stdlib_module_docstring,
+    _positron_version_outdated
+
 function _capture_package_helper_stdout(callback)::String
     path = tempname()
     try
@@ -313,6 +336,30 @@ end
         mktempdir() do package_dir
             @test _positron_read_license_file(package_dir) == ""
         end
+    end
+
+    @testset "Immune to Main Shadowing" begin
+        # Issue #32: a user variable named `values` (or any other Base name)
+        # in the module that includes the script must not break the helpers,
+        # which used to be defined directly in that module and so resolved
+        # `values(...)` against the user's binding. Simulated in a scratch
+        # module standing in for the user's Main: pre-1.12 Julia forbids
+        # assigning over an already-resolved imported binding in the real
+        # Main, so the real thing cannot be shadowed from within the tests.
+        script = normpath(
+            joinpath(@__DIR__, "..", "..", "..", "scripts", "packages", "packages.jl"),
+        )
+        user_main = Module(:PositronShadowedMain)
+        Base.include(user_main, script)
+        Core.eval(user_main, :(values = [3, 7, 2, 5, 4]))
+
+        # Same call shape the extension sends to the kernel.
+        json = _capture_package_helper_stdout() do
+            Core.eval(user_main, :(_PositronPackages._positron_list_packages()))
+        end
+        parsed = JSON3.read(json, Vector{Dict{String, Any}})
+        @test !isempty(parsed)
+        @test all(haskey(p, "name") for p in parsed)
     end
 
     @testset "Missing Packages Detection" begin

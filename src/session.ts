@@ -14,6 +14,10 @@ import {
 } from "./positron-supervisor";
 import { JuliaPackageManager } from "./packages";
 import { listMissingJuliaPackages } from "./missingPackages";
+import {
+  isPkgReplPrompt,
+  setJuliaPkgReplModeContext,
+} from "./pkg-repl-console-state";
 
 interface RuntimeResourceUsage {
   [key: string]: unknown;
@@ -84,6 +88,9 @@ export class JuliaSession
     this.dynState = {
       // Do not put ANSI here. Positron's inputPrompt renderer currently
       // displays ANSI escape sequences literally.
+      // Keep in sync with JULIA_INPUT_PROMPT/JULIA_CONTINUATION_PROMPT in
+      // julia/Positron/src/kernel.jl, which restores these prompts when the
+      // console leaves Pkg REPL mode.
       inputPrompt: "julia>",
       continuationPrompt: "      ",
       sessionName: sessionName || runtimeMetadata.runtimeName,
@@ -253,6 +260,7 @@ export class JuliaSession
     // Forward events from the Jupyter session
     this._kernel.onDidReceiveRuntimeMessage(
       (msg: positron.LanguageRuntimeMessage) => {
+        this.updatePkgReplModeContext(msg);
         this._rawMessageEmitter.fire(msg);
         if (!this._suppressedExecutionIds.has(msg.parent_id)) {
           this._messageEmitter.fire(msg);
@@ -327,6 +335,23 @@ export class JuliaSession
     });
 
     return this.runtimeInfo;
+  }
+
+  private updatePkgReplModeContext(msg: positron.LanguageRuntimeMessage): void {
+    if (msg.type !== positron.LanguageRuntimeMessageType.CommData) {
+      return;
+    }
+
+    const data = (msg as positron.LanguageRuntimeCommMessage).data as {
+      method?: unknown;
+      params?: { input_prompt?: unknown };
+    };
+
+    if (data?.method !== "prompt_state") {
+      return;
+    }
+
+    setJuliaPkgReplModeContext(isPkgReplPrompt(data.params?.input_prompt));
   }
 
   execute(

@@ -228,4 +228,77 @@ end
         # Unicode
         @test Positron.check_code_complete("α = 1; β = 2; γ = α + β") == "complete"
     end
+
+    @testset "REPL special modes" begin
+        # Pkg mode (issue #35), help mode, and shell mode never parse as
+        # Julia syntax but execute through IJulia's special-mode handling,
+        # so the console must treat them as complete input.
+        @test Positron.check_code_complete("]") == "complete"
+        @test Positron.check_code_complete("] add Example") == "complete"
+        @test Positron.check_code_complete("]status") == "complete"
+        @test Positron.check_code_complete("  ] st  ") == "complete"
+        @test Positron.check_code_complete("?println") == "complete"
+        @test Positron.check_code_complete(";ls") == "complete"
+
+        # Multi-line input is never a special mode.
+        @test Positron.check_code_complete("] add Example\nx = 1") == "invalid"
+    end
+end
+
+@testset "extract_pkg_repl_command" begin
+    # Bare `]` means the user wants to enter Pkg REPL mode.
+    @test Positron.extract_pkg_repl_command("]") == ""
+    @test Positron.extract_pkg_repl_command("  ]  ") == ""
+
+    # One-line Pkg commands, with or without a space after `]`.
+    @test Positron.extract_pkg_repl_command("] add DataFrames") == "add DataFrames"
+    @test Positron.extract_pkg_repl_command("]st") == "st"
+    @test Positron.extract_pkg_repl_command("  ] update  ") == "update"
+
+    # Not Pkg-mode input.
+    @test Positron.extract_pkg_repl_command("x = [1, 2]") === nothing
+    @test Positron.extract_pkg_repl_command("") === nothing
+    @test Positron.extract_pkg_repl_command("] add Example\nx = 1") === nothing
+end
+
+@testset "Pkg REPL mode" begin
+    @testset "Prompt" begin
+        prompt = Positron.pkg_repl_prompt()
+        @test endswith(prompt, "pkg>")
+        # Tests run with an active project, so the prompt carries its label.
+        @test startswith(prompt, "(")
+    end
+
+    @testset "Enter and exit" begin
+        @test !Positron.PKG_REPL_MODE[]
+        try
+            # The entry hint prints to stdout; silence it for the test log.
+            redirect_stdout(devnull) do
+                Positron.enter_pkg_repl_mode!()
+            end
+            @test Positron.PKG_REPL_MODE[]
+            Positron.exit_pkg_repl_mode!()
+
+            redirect_stdout(devnull) do
+                Positron.enter_pkg_repl_mode!(; show_message = false)
+            end
+            @test Positron.PKG_REPL_MODE[]
+
+            # While in Pkg mode, any single line is complete input.
+            @test Positron.check_code_complete("add Example") == "complete"
+            @test Positron.check_code_complete("x = ") == "complete"
+        finally
+            Positron.exit_pkg_repl_mode!()
+        end
+        @test !Positron.PKG_REPL_MODE[]
+    end
+
+    @testset "Extension-internal code bypass" begin
+        # Package-pane mutations must run as Julia even while in Pkg mode.
+        @test Positron.is_extension_internal_code(
+            "_PositronPackages._positron_install_packages([\"Example\"])",
+        )
+        @test !Positron.is_extension_internal_code("add DataFrames")
+        @test !Positron.is_extension_internal_code("x = 1")
+    end
 end

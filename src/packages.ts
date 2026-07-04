@@ -16,6 +16,11 @@ import { LOGGER } from "./extension";
 const QUERY_TIMEOUT_MS = 2 * 60 * 1000;
 const MUTATION_TIMEOUT_MS = 30 * 60 * 1000;
 
+// The Julia helpers are defined inside this module (see packages.jl) so that
+// the names they use cannot be shadowed by user globals in Main (issue #32).
+// All generated code must reference them through this qualified prefix.
+const HELPER_MODULE = "_PositronPackages";
+
 interface JuliaPackageSession {
   execute(
     code: string,
@@ -129,8 +134,10 @@ export class JuliaPackageManager
       const escapedScriptPath = this._escapeJuliaStringLiteral(
         this._scriptPath,
       );
+      // Base.include instead of bare include: the bare name resolves through
+      // Main and can be shadowed by a user global named `include`.
       await this._executeAndCapture(
-        `include("${escapedScriptPath}")`,
+        `Base.include(Main, "${escapedScriptPath}")`,
         positron.RuntimeCodeExecutionMode.Silent,
         QUERY_TIMEOUT_MS,
       );
@@ -184,7 +191,7 @@ export class JuliaPackageManager
       return;
     }
 
-    const code = `_positron_install_packages(${this._toJuliaStringVector(specs)})`;
+    const code = `${HELPER_MODULE}._positron_install_packages(${this._toJuliaStringVector(specs)})`;
     await this._executeAndWait(code, MUTATION_TIMEOUT_MS, token);
     this._firePackagesChanged(
       this._uniquePackageNames(requested.map((pkg) => pkg.name)),
@@ -206,7 +213,7 @@ export class JuliaPackageManager
     }
 
     await this._executeAndWait(
-      `_positron_uninstall_packages(${this._toJuliaStringVector(names)})`,
+      `${HELPER_MODULE}._positron_uninstall_packages(${this._toJuliaStringVector(names)})`,
       MUTATION_TIMEOUT_MS,
       token,
     );
@@ -230,7 +237,7 @@ export class JuliaPackageManager
     }
 
     await this._executeAndWait(
-      `_positron_update_packages(${this._toJuliaStringVector(names)})`,
+      `${HELPER_MODULE}._positron_update_packages(${this._toJuliaStringVector(names)})`,
       MUTATION_TIMEOUT_MS,
       token,
     );
@@ -242,7 +249,7 @@ export class JuliaPackageManager
     const packagesBefore = await this._listPackagesFromRuntime(token);
 
     await this._executeAndWait(
-      "_positron_update_all_packages()",
+      `${HELPER_MODULE}._positron_update_all_packages()`,
       MUTATION_TIMEOUT_MS,
       token,
     );
@@ -271,7 +278,7 @@ export class JuliaPackageManager
     const escaped = this._escapeJuliaStringLiteral(query);
 
     const raw = await this._executeAndCapture(
-      `_positron_search_packages("${escaped}")`,
+      `${HELPER_MODULE}._positron_search_packages("${escaped}")`,
       positron.RuntimeCodeExecutionMode.Silent,
       QUERY_TIMEOUT_MS,
       token,
@@ -294,7 +301,7 @@ export class JuliaPackageManager
     const escaped = this._escapeJuliaStringLiteral(name);
 
     const raw = await this._executeAndCapture(
-      `_positron_search_package_versions("${escaped}")`,
+      `${HELPER_MODULE}._positron_search_package_versions("${escaped}")`,
       positron.RuntimeCodeExecutionMode.Silent,
       QUERY_TIMEOUT_MS,
       token,
@@ -324,7 +331,7 @@ export class JuliaPackageManager
     await this.sourcePackagesScript();
 
     const raw = await this._executeAndCapture(
-      `_positron_missing_packages(${this._toJuliaStringVector(cleaned)})`,
+      `${HELPER_MODULE}._positron_missing_packages(${this._toJuliaStringVector(cleaned)})`,
       positron.RuntimeCodeExecutionMode.Silent,
       QUERY_TIMEOUT_MS,
       token,
@@ -348,7 +355,7 @@ export class JuliaPackageManager
     await this.sourcePackagesScript();
 
     const raw = await this._executeAndCapture(
-      `_positron_package_metadata(${this._toJuliaStringVector(cleaned)})`,
+      `${HELPER_MODULE}._positron_package_metadata(${this._toJuliaStringVector(cleaned)})`,
       positron.RuntimeCodeExecutionMode.Silent,
       QUERY_TIMEOUT_MS,
       token,
@@ -388,7 +395,7 @@ export class JuliaPackageManager
 
     const escaped = this._escapeJuliaStringLiteral(trimmed);
     const raw = await this._executeAndCapture(
-      `_positron_package_detail("${escaped}")`,
+      `${HELPER_MODULE}._positron_package_detail("${escaped}")`,
       positron.RuntimeCodeExecutionMode.Silent,
       QUERY_TIMEOUT_MS,
       token,
@@ -521,7 +528,7 @@ export class JuliaPackageManager
     stdlibNames?: Set<string>,
   ): Promise<positron.LanguageRuntimePackage[]> {
     const raw = await this._executeAndCapture(
-      "_positron_list_packages()",
+      `${HELPER_MODULE}._positron_list_packages()`,
       positron.RuntimeCodeExecutionMode.Silent,
       QUERY_TIMEOUT_MS,
       token,
@@ -741,17 +748,19 @@ export class JuliaPackageManager
     const escapedPath = this._escapeJuliaStringLiteral(tempFile);
     const escapedPathErr = this._escapeJuliaStringLiteral(tempFileErr);
 
+    // Every function here is Base-qualified: this snippet runs in Main, where
+    // bare names like `open` can be shadowed by user globals (issue #32).
     const wrappedCode =
-      `let __positron_io = open("${escapedPath}", "w"), __positron_err = open("${escapedPathErr}", "w")\n` +
+      `let __positron_io = Base.open("${escapedPath}", "w"), __positron_err = Base.open("${escapedPathErr}", "w")\n` +
       `try\n` +
-      `redirect_stdout(__positron_io) do\n` +
-      `redirect_stderr(__positron_err) do\n` +
+      `Base.redirect_stdout(__positron_io) do\n` +
+      `Base.redirect_stderr(__positron_err) do\n` +
       `${code}\n` +
       `end\n` +
       `end\n` +
       `finally\n` +
-      `close(__positron_io)\n` +
-      `flush(__positron_err)\n` +
+      `Base.close(__positron_io)\n` +
+      `Base.flush(__positron_err)\n` +
       `end\n` +
       `end`;
 

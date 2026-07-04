@@ -20,6 +20,7 @@ import { JuliaEnvironmentManager } from './environment';
 import { TestFeature } from './testing/testFeature';
 import { notifyTypeTextDocumentPublishTests } from './testing/testLSProtocol';
 import { registerDebugFeature } from './debugger/debugFeature';
+import { registerPkgReplConsoleKeybindings } from './pkg-repl-console-keybindings';
 
 export const LOGGER = vscode.window.createOutputChannel('Julia Language Pack', { log: true });
 
@@ -78,6 +79,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Register commands
 	registerCommands(context, juliaRuntimeManager);
+	registerPkgReplConsoleKeybindings(context, juliaRuntimeManager);
 
 	// Module-level session getter used by the completion provider and the LSP
 	// repl/getCompletions bridge.

@@ -3,6 +3,12 @@
 # Licensed under the Elastic License 2.0. See LICENSE.txt for license information.
 # ---------------------------------------------------------------------------------------------
 
+# The helpers live in a module (instead of directly in `Main`) so that
+# unqualified Base names used here — `values`, `keys`, `filter`, ... —
+# always resolve to Base, even when the user shadows them with globals in
+# `Main` (e.g. `values = [3, 7, 2]`). See issue #32.
+module _PositronPackages
+
 import Pkg
 import TOML
 
@@ -1017,3 +1023,5 @@ function _positron_search_package_versions(name::String)
     sorted_versions = sort!(collect(versions); rev=true)
     _positron_print_json_string_array(string.(sorted_versions))
 end
+
+end # module _PositronPackages

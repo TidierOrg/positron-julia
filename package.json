@@ -2,7 +2,7 @@
   "name": "positron-julia",
   "displayName": "Julia for Positron",
   "description": "Julia language support for Positron IDE",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "publisher": "ntluong95",
   "author": "TidierOrg, rdboyes, ntluong95",
   "contributors": [
@@ -35,6 +35,7 @@
     "onLanguageRuntime:julia",
     "onLanguage:julia",
     "onCommand:julia.createNewFile",
+    "onCommand:julia.createNewPackage",
     "onCommand:julia.selectInterpreter",
     "onCommand:julia.runFile",
     "onCommand:julia.runSelection",
@@ -45,6 +46,8 @@
     "onCommand:julia.changeCurrentEnvironment",
     "onCommand:julia.executeCell",
     "onCommand:julia.executeCellAndMove",
+    "onCommand:julia.enterPkgReplModeFromConsole",
+    "onCommand:julia.exitPkgReplModeFromConsole",
     "onCommand:julia.stopTestProcess",
     "onCommand:julia.stopTestController",
     "onCommand:julia.runEditorContents",
@@ -124,6 +127,11 @@
         "title": "New Julia File"
       },
       {
+        "command": "julia.createNewPackage",
+        "category": "Julia",
+        "title": "Create New Package"
+      },
+      {
         "command": "julia.selectInterpreter",
         "category": "Julia",
         "title": "Select Julia Interpreter"
@@ -180,6 +188,16 @@
         "command": "julia.executeCellAndMove",
         "category": "Julia",
         "title": "Execute Code Cell and Move to Next"
+      },
+      {
+        "command": "julia.enterPkgReplModeFromConsole",
+        "category": "Julia",
+        "title": "Enter Pkg REPL Mode"
+      },
+      {
+        "command": "julia.exitPkgReplModeFromConsole",
+        "category": "Julia",
+        "title": "Exit Pkg REPL Mode"
       },
       {
         "command": "julia.stopTestProcess",
@@ -275,6 +293,16 @@
         "command": "julia.executeCellAndMove",
         "key": "alt+shift+enter",
         "when": "editorLangId == julia && editorTextFocus"
+      },
+      {
+        "command": "julia.enterPkgReplModeFromConsole",
+        "key": "]",
+        "when": "positronConsoleFocused && textInputFocus && !positronConsoleFindInputFocused && !suggestWidgetVisible && positronConsoleInputCursorBoundary == both && !positronJuliaPkgReplMode"
+      },
+      {
+        "command": "julia.exitPkgReplModeFromConsole",
+        "key": "backspace",
+        "when": "positronConsoleFocused && textInputFocus && !positronConsoleFindInputFocused && positronConsoleInputCursorBoundary == both && positronJuliaPkgReplMode"
       }
     ],
     "configuration": {
