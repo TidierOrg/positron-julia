@@ -277,6 +277,12 @@ end
                 Positron.enter_pkg_repl_mode!()
             end
             @test Positron.PKG_REPL_MODE[]
+            Positron.exit_pkg_repl_mode!()
+
+            redirect_stdout(devnull) do
+                Positron.enter_pkg_repl_mode!(; show_message = false)
+            end
+            @test Positron.PKG_REPL_MODE[]
 
             # While in Pkg mode, any single line is complete input.
             @test Positron.check_code_complete("add Example") == "complete"

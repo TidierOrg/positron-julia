@@ -46,6 +46,8 @@
     "onCommand:julia.changeCurrentEnvironment",
     "onCommand:julia.executeCell",
     "onCommand:julia.executeCellAndMove",
+    "onCommand:julia.enterPkgReplModeFromConsole",
+    "onCommand:julia.exitPkgReplModeFromConsole",
     "onCommand:julia.stopTestProcess",
     "onCommand:julia.stopTestController",
     "onCommand:julia.runEditorContents",
@@ -188,6 +190,16 @@
         "title": "Execute Code Cell and Move to Next"
       },
       {
+        "command": "julia.enterPkgReplModeFromConsole",
+        "category": "Julia",
+        "title": "Enter Pkg REPL Mode"
+      },
+      {
+        "command": "julia.exitPkgReplModeFromConsole",
+        "category": "Julia",
+        "title": "Exit Pkg REPL Mode"
+      },
+      {
         "command": "julia.stopTestProcess",
         "category": "Julia",
         "title": "Stop Test Process",
@@ -281,6 +293,16 @@
         "command": "julia.executeCellAndMove",
         "key": "alt+shift+enter",
         "when": "editorLangId == julia && editorTextFocus"
+      },
+      {
+        "command": "julia.enterPkgReplModeFromConsole",
+        "key": "]",
+        "when": "positronConsoleFocused && textInputFocus && !positronConsoleFindInputFocused && !suggestWidgetVisible && positronConsoleInputCursorBoundary == both && !positronJuliaPkgReplMode"
+      },
+      {
+        "command": "julia.exitPkgReplModeFromConsole",
+        "key": "backspace",
+        "when": "positronConsoleFocused && textInputFocus && !positronConsoleFindInputFocused && positronConsoleInputCursorBoundary == both && positronJuliaPkgReplMode"
       }
     ],
     "configuration": {

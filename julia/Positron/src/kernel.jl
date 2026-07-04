@@ -810,12 +810,12 @@ end
 # Pkg REPL mode
 # -------------------------------------------------------------------------
 # Forked from julia-vscode's REPL integration, where a LineEdit keymap bound
-# to `]` transitions the terminal REPL into Pkg.REPLMode. A Jupyter-based
-# console never sees raw keystrokes, so the transition happens on submission
-# instead: a bare `]` enters the mode, Positron's `prompt_state` UI event
-# switches the console prompt to the environment-aware `pkg>`, and every
-# subsequent submission runs as a Pkg REPL command until the user leaves the
-# mode (issue #35).
+# to `]` transitions the terminal REPL into Pkg.REPLMode. Positron's console is
+# Jupyter-backed, so the extension binds the empty-prompt `]` key on the
+# frontend and this kernel handler also supports submitted bare `]` input.
+# Positron's `prompt_state` UI event switches the console prompt to the
+# environment-aware `pkg>`, and every subsequent submission runs as a Pkg REPL
+# command until the user leaves the mode (issue #35).
 
 # Default console prompts. Keep in sync with the session dynState in the
 # extension's src/session.ts.
@@ -827,9 +827,8 @@ Whether the console is currently in Pkg REPL mode.
 """
 const PKG_REPL_MODE = Ref(false)
 
-# The terminal REPL leaves Pkg mode via the Backspace/Ctrl-C keystrokes,
-# which never reach a Jupyter kernel; these commands are the console
-# equivalent (none of them is a valid Pkg REPL command).
+# The extension binds Backspace at an empty `pkg>` console input to exit the
+# mode. These typed commands remain useful when input is submitted normally.
 const PKG_REPL_EXIT_COMMANDS = ("back", "exit", "quit")
 
 """
@@ -882,13 +881,15 @@ function update_console_prompts!()
     end
 end
 
-function enter_pkg_repl_mode!()
+function enter_pkg_repl_mode!(; show_message::Bool = true)
     PKG_REPL_MODE[] = true
     update_console_prompts!()
-    println(
-        "Entered Pkg REPL mode. Run commands like `status` or `add DataFrames`; " *
-        "type `back` or `exit` to return to the julia> prompt.",
-    )
+    if show_message
+        println(
+            "Entered Pkg REPL mode. Run commands like `status` or `add DataFrames`; " *
+            "press Backspace at an empty pkg> prompt or type `back` to return to julia>.",
+        )
+    end
 end
 
 function exit_pkg_repl_mode!()
