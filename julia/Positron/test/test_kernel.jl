@@ -228,4 +228,35 @@ end
         # Unicode
         @test Positron.check_code_complete("α = 1; β = 2; γ = α + β") == "complete"
     end
+
+    @testset "REPL special modes" begin
+        # Pkg mode (issue #35), help mode, and shell mode never parse as
+        # Julia syntax but execute through IJulia's special-mode handling,
+        # so the console must treat them as complete input.
+        @test Positron.check_code_complete("]") == "complete"
+        @test Positron.check_code_complete("] add Example") == "complete"
+        @test Positron.check_code_complete("]status") == "complete"
+        @test Positron.check_code_complete("  ] st  ") == "complete"
+        @test Positron.check_code_complete("?println") == "complete"
+        @test Positron.check_code_complete(";ls") == "complete"
+
+        # Multi-line input is never a special mode.
+        @test Positron.check_code_complete("] add Example\nx = 1") == "invalid"
+    end
+end
+
+@testset "extract_pkg_repl_command" begin
+    # Bare `]` means the user tried to enter the interactive Pkg REPL.
+    @test Positron.extract_pkg_repl_command("]") == ""
+    @test Positron.extract_pkg_repl_command("  ]  ") == ""
+
+    # One-line Pkg commands, with or without a space after `]`.
+    @test Positron.extract_pkg_repl_command("] add DataFrames") == "add DataFrames"
+    @test Positron.extract_pkg_repl_command("]st") == "st"
+    @test Positron.extract_pkg_repl_command("  ] update  ") == "update"
+
+    # Not Pkg-mode input.
+    @test Positron.extract_pkg_repl_command("x = [1, 2]") === nothing
+    @test Positron.extract_pkg_repl_command("") === nothing
+    @test Positron.extract_pkg_repl_command("] add Example\nx = 1") === nothing
 end

@@ -735,6 +735,14 @@ This implementation uses Meta.parseall which correctly handles multiple expressi
 and checks if any of them are incomplete.
 """
 function check_code_complete(code::String)
+    # REPL special-mode one-liners (`] add X`, `?foo`, `;ls`) never parse as
+    # valid Julia syntax, so without this check the console would report them
+    # as invalid input. They execute through IJulia's special modes (and our
+    # own Pkg/help routing), so report them complete.
+    if is_repl_magic_line(code)
+        return "complete"
+    end
+
     try
         ex = Meta.parseall(code)
 
@@ -753,6 +761,17 @@ function check_code_complete(code::String)
         kernel_log_warn("Error parsing code for completeness check: $e")
         return "invalid"
     end
+end
+
+"""
+Whether the input is a single-line REPL special-mode command: Pkg mode
+(`] add X`), help mode (`?foo`), or shell mode (`;ls`).
+"""
+function is_repl_magic_line(code::AbstractString)::Bool
+    stripped = strip(code)
+    isempty(stripped) && return false
+    occursin('\n', stripped) && return false
+    return first(stripped) in (']', '?', ';')
 end
 
 """
@@ -783,8 +802,37 @@ function install_is_complete_handler!()
 end
 
 """
+Message printed when the user tries to enter the interactive Pkg REPL with a
+bare `]`. A Jupyter-based console has no modal prompt, so instead of silently
+doing nothing (issue #35), explain the supported one-line form.
+"""
+const PKG_REPL_GUIDANCE = """
+The interactive Pkg REPL (pkg>) is not available in Positron's console.
+Run Pkg commands on a single line instead:
+
+  ] status              # show installed packages
+  ] add DataFrames      # install a package
+  ] help                # list all Pkg commands
+
+Or call the Pkg API directly, e.g. import Pkg; Pkg.add("DataFrames").
+"""
+
+"""
+Extract the Pkg REPL command from Pkg-mode console input (a single line
+starting with `]`, as in `] add DataFrames`). Returns `nothing` when the code
+is not Pkg-mode input; a bare `]` returns an empty string.
+"""
+function extract_pkg_repl_command(code::AbstractString)::Union{String,Nothing}
+    stripped = strip(String(code))
+    startswith(stripped, ']') || return nothing
+    occursin('\n', stripped) && return nothing
+    return String(strip(chop(stripped; head = 1, tail = 0)))
+end
+
+"""
 Install a custom execute_request handler that routes REPL help-mode (`?topic`)
-to Positron's Help pane instead of returning HTML to the Viewer pane.
+to Positron's Help pane instead of returning HTML to the Viewer pane, and
+gives Pkg-mode input (`]`) a sensible behavior in the console.
 """
 function install_execute_request_handler!()
     if !isdefined(IJulia, :handlers)
@@ -800,8 +848,26 @@ function install_execute_request_handler!()
 
     IJulia.handlers["execute_request"] = function (socket, ijulia_kernel, msg)
         code = msg.content["code"]::String
-        topic = extract_help_topic_from_code(code)
 
+        pkg_command = extract_pkg_repl_command(code)
+        if pkg_command !== nothing
+            if isempty(pkg_command)
+                # Bare `]`: IJulia would run an empty Pkg command and produce
+                # no output at all. Print guidance instead so the input
+                # visibly does something.
+                return execute_positron_action(ijulia_kernel, msg) do
+                    print(PKG_REPL_GUIDANCE)
+                end
+            end
+
+            # One-line commands (`] add Foo`) are handled by IJulia's own
+            # execute path; normalize surrounding whitespace so its `^\\]`
+            # match always fires.
+            msg.content["code"] = String(strip(code))
+            return original_execute_request(socket, ijulia_kernel, msg)
+        end
+
+        topic = extract_help_topic_from_code(code)
         if topic === nothing
             return original_execute_request(socket, ijulia_kernel, msg)
         end
@@ -812,102 +878,116 @@ function install_execute_request_handler!()
             return original_execute_request(socket, ijulia_kernel, msg)
         end
 
-        ijulia_kernel.execute_msg = msg
-        ijulia_kernel.stdio_bytes = 0
-        silent = msg.content["silent"]::Bool
-        store_history = get(msg.content, "store_history", !silent)::Bool
-        empty!(ijulia_kernel.execute_payloads)
-
-        if !silent
-            ijulia_kernel.n += 1
-            IJulia.send_ipython(
-                ijulia_kernel.publish[],
-                ijulia_kernel,
-                IJulia.msg_pub(
-                    msg,
-                    "execute_input",
-                    Dict("execution_count" => ijulia_kernel.n, "code" => code),
-                ),
-            )
-        end
-
-        if store_history
-            ijulia_kernel.In[ijulia_kernel.n] = code
-        end
-
-        try
-            foreach(Base.invokelatest, IJulia._preexecute_hooks)
-
-            if !silent
-                show_help!(positron_kernel.help, topic)
-            end
-
-            user_expressions = Dict{String,Any}()
-            for (v::String, ex::String) in get(msg.content, "user_expressions", Dict{String,Any}())
-                try
-                    value = include_string(ijulia_kernel.current_module, ex)
-                    user_expressions[v] = Dict(
-                        "status" => "ok",
-                        "data" => Base.invokelatest(IJulia.display_dict, value),
-                        "metadata" => Base.invokelatest(IJulia.metadata, value),
-                    )
-                catch e
-                    user_expressions[v] = Dict(
-                        "status" => "error",
-                        IJulia.error_content(e, catch_backtrace())...,
-                    )
-                end
-            end
-
-            foreach(Base.invokelatest, IJulia._postexecute_hooks)
-
-            IJulia.flush_all()
-            yield()
-            if haskey(ijulia_kernel.bufs, "stdout")
-                IJulia.send_stdout(ijulia_kernel)
-            end
-            if haskey(ijulia_kernel.bufs, "stderr")
-                IJulia.send_stderr(ijulia_kernel)
-            end
-
-            Base.invokelatest(IJulia.flush_kernel_display, ijulia_kernel)
-
-            IJulia.send_ipython(
-                ijulia_kernel.requests[],
-                ijulia_kernel,
-                IJulia.msg_reply(
-                    msg,
-                    "execute_reply",
-                    Dict(
-                        "status" => "ok",
-                        "payload" => ijulia_kernel.execute_payloads,
-                        "execution_count" => ijulia_kernel.n,
-                        "user_expressions" => user_expressions,
-                    ),
-                ),
-            )
-            empty!(ijulia_kernel.execute_payloads)
-        catch e
-            bt = catch_backtrace()
-            try
-                IJulia.flush_all()
-                foreach(Base.invokelatest, IJulia._posterror_hooks)
-            catch
-            end
-            empty!(ijulia_kernel.displayqueue)
-            content = IJulia.error_content(e, bt)
-            IJulia.send_ipython(ijulia_kernel.publish[], ijulia_kernel, IJulia.msg_pub(msg, "error", content))
-            content["status"] = "error"
-            content["execution_count"] = ijulia_kernel.n
-            IJulia.send_ipython(
-                ijulia_kernel.requests[],
-                ijulia_kernel,
-                IJulia.msg_reply(msg, "execute_reply", content),
-            )
+        return execute_positron_action(ijulia_kernel, msg) do
+            show_help!(positron_kernel.help, topic)
         end
     end
 
     kernel_log_info("Installed custom execute_request handler")
+end
+
+"""
+Run the standard execute_request bookkeeping (execute_input broadcast,
+history, execution hooks, stdout/stderr flushing, execute_reply) around
+`action`, instead of evaluating the submitted code. Used for console inputs
+that Positron handles itself: help-mode routing and Pkg-mode guidance.
+"""
+function execute_positron_action(action::Function, ijulia_kernel, msg)
+    code = msg.content["code"]::String
+
+    ijulia_kernel.execute_msg = msg
+    ijulia_kernel.stdio_bytes = 0
+    silent = msg.content["silent"]::Bool
+    store_history = get(msg.content, "store_history", !silent)::Bool
+    empty!(ijulia_kernel.execute_payloads)
+
+    if !silent
+        ijulia_kernel.n += 1
+        IJulia.send_ipython(
+            ijulia_kernel.publish[],
+            ijulia_kernel,
+            IJulia.msg_pub(
+                msg,
+                "execute_input",
+                Dict("execution_count" => ijulia_kernel.n, "code" => code),
+            ),
+        )
+    end
+
+    if store_history
+        ijulia_kernel.In[ijulia_kernel.n] = code
+    end
+
+    try
+        foreach(Base.invokelatest, IJulia._preexecute_hooks)
+
+        if !silent
+            action()
+        end
+
+        user_expressions = Dict{String,Any}()
+        for (v::String, ex::String) in get(msg.content, "user_expressions", Dict{String,Any}())
+            try
+                value = include_string(ijulia_kernel.current_module, ex)
+                user_expressions[v] = Dict(
+                    "status" => "ok",
+                    "data" => Base.invokelatest(IJulia.display_dict, value),
+                    "metadata" => Base.invokelatest(IJulia.metadata, value),
+                )
+            catch e
+                user_expressions[v] = Dict(
+                    "status" => "error",
+                    IJulia.error_content(e, catch_backtrace())...,
+                )
+            end
+        end
+
+        foreach(Base.invokelatest, IJulia._postexecute_hooks)
+
+        IJulia.flush_all()
+        yield()
+        if haskey(ijulia_kernel.bufs, "stdout")
+            IJulia.send_stdout(ijulia_kernel)
+        end
+        if haskey(ijulia_kernel.bufs, "stderr")
+            IJulia.send_stderr(ijulia_kernel)
+        end
+
+        Base.invokelatest(IJulia.flush_kernel_display, ijulia_kernel)
+
+        IJulia.send_ipython(
+            ijulia_kernel.requests[],
+            ijulia_kernel,
+            IJulia.msg_reply(
+                msg,
+                "execute_reply",
+                Dict(
+                    "status" => "ok",
+                    "payload" => ijulia_kernel.execute_payloads,
+                    "execution_count" => ijulia_kernel.n,
+                    "user_expressions" => user_expressions,
+                ),
+            ),
+        )
+        empty!(ijulia_kernel.execute_payloads)
+    catch e
+        bt = catch_backtrace()
+        try
+            IJulia.flush_all()
+            foreach(Base.invokelatest, IJulia._posterror_hooks)
+        catch
+        end
+        empty!(ijulia_kernel.displayqueue)
+        content = IJulia.error_content(e, bt)
+        IJulia.send_ipython(ijulia_kernel.publish[], ijulia_kernel, IJulia.msg_pub(msg, "error", content))
+        content["status"] = "error"
+        content["execution_count"] = ijulia_kernel.n
+        IJulia.send_ipython(
+            ijulia_kernel.requests[],
+            ijulia_kernel,
+            IJulia.msg_reply(msg, "execute_reply", content),
+        )
+    end
 end
 
 """
