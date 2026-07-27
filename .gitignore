@@ -2,6 +2,7 @@ out/
 node_modules/
 *.vsix
 .vscode-test/
+.positron-test/
 lsdepot/
 .beads/
 .DS_Store
