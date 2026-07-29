@@ -75,6 +75,21 @@ export function parseJuliaPackageReferences(code: string): string[] {
   return [...packages];
 }
 
+/** Julia: `ArgumentError: Package Foo not found in current path.` */
+const JULIA_MISSING_PACKAGE_REGEX =
+  /ArgumentError: Package (\S+) not found in current path/;
+
+/**
+ * Build a probe snippet (`using Foo`) from a Julia missing-package error, or
+ * undefined when the message is not a missing-package error.
+ */
+export function juliaMissingPackageProbe(
+  errorMessage: string,
+): string | undefined {
+  const name = JULIA_MISSING_PACKAGE_REGEX.exec(errorMessage)?.[1];
+  return name ? `using ${name}` : undefined;
+}
+
 /**
  * The subset of JuliaPackageManager that the missing-packages analyzer
  * needs: a single kernel round-trip that filters candidate names down to

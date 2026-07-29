@@ -13,7 +13,10 @@ import {
   JupyterKernelSpec,
 } from "./positron-supervisor";
 import { JuliaPackageManager } from "./packages";
-import { listMissingJuliaPackages } from "./missingPackages";
+import {
+  listMissingJuliaPackages,
+  juliaMissingPackageProbe,
+} from "./missingPackages";
 import {
   isPkgReplPrompt,
   setJuliaPkgReplModeContext,
@@ -512,6 +515,12 @@ export class JuliaSession
     token?: vscode.CancellationToken,
   ): Promise<positron.RuntimeMissingPackage[]> {
     return listMissingJuliaPackages(this._packageManager, target, token);
+  }
+
+  getMissingPackageProbe(
+    error: positron.RuntimeConsoleError,
+  ): string | undefined {
+    return juliaMissingPackageProbe(error.message);
   }
 
   updateSessionName(name: string): void {
