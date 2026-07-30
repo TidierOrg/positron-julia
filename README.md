@@ -27,6 +27,7 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 - **TestItem Compatible** - Uses the same testing system as `julia-vscode`
 - **Debugger** - Use breakpoints, inspect local and global variables, etc.
 - **Formatting** — Format Document (Shift+Alt+F) and Format Selection (Ctrl+K Ctrl+F) via [JuliaFormatter.jl](https://github.com/domluna/JuliaFormatter.jl), powered by the language server. Configurable through a `.JuliaFormatter.toml` file at the workspace root.
+- **Missing Package Prompts** — Detects packages your code references but that aren't installed, and offers to install them from the console, before running a file, and in the editor. See [Missing Package Prompts](#missing-package-prompts) — these rely on Positron preview settings.
 
 ## Requirements
 
@@ -42,7 +43,42 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 
 On first launch, the extension automatically installs required Julia packages (`IJulia`, `LanguageServer.jl`, and supporting dependencies). This one-time setup may take a few minutes.
 
+## Missing Package Prompts
+
+When your Julia code references a package that isn't installed, Positron can offer to install it in three places:
+
+| Where | What you see | Positron setting |
+| ----- | ------------ | ---------------- |
+| **Console** | An `Install <Pkg>` suggestion beneath a `Package X not found in current path` error | `packages.suggestInstallOnError` |
+| **Before running a file** | An *Install Missing Packages* dialog listing every missing package, with **Install Packages and Run** | `packages.confirmMissingOnRun` |
+| **Editor** | A `N missing packages` warning badge in the editor action bar | `packages.warnMissingInEditor` |
+
+> [!WARNING]
+> These are **Positron preview features**, not settings contributed by this extension. They require a recent Positron build (reported working on **2026.08.0 build 249** and newer) — on older builds the settings don't exist and no prompts appear, regardless of this extension's version.
+>
+> All three default to `true`, so normally no configuration is needed. If a prompt doesn't appear, open **Settings** and search for `packages.` to confirm the relevant setting above is enabled — each surface is gated *independently*, so the console suggestion can work while the editor badge is switched off.
+
+To enable them explicitly, add to your `settings.json`:
+
+```jsonc
+{
+  // Suggest installing a package when a console error reports it missing
+  "packages.suggestInstallOnError": true,
+  // Offer to install missing packages before running a file or notebook
+  "packages.confirmMissingOnRun": true,
+  // Show the "N missing packages" badge in the editor action bar
+  "packages.warnMissingInEditor": true
+}
+```
+
+Notes:
+
+- The prompts only offer packages that exist in a reachable registry, so unregistered or GitHub-only packages are never suggested.
+- The editor badge needs a **running Julia console session** for the open file — it stays hidden until a session is started. It also hides itself when the editor action bar is too narrow to fit it.
+
 ## Extension Settings
+
+Contributed by this extension:
 
 | Setting                                         | Default | Description                                                 |
 | ----------------------------------------------- | ------- | ----------------------------------------------------------- |
