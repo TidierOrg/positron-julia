@@ -1,6 +1,7 @@
 .vscode/**
 src/**
 out/test/**
+.positron-test/**
 tsconfig.json
 typings/**
 .github/**
