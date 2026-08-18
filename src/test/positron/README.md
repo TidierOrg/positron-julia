@@ -30,11 +30,17 @@ npm run test-positron                          # against the latest stable Posit
 POSITRON_CHANNEL=daily npm run test-positron   # against a daily build
 ```
 
-> **Note:** `@posit-dev/positron-test-electron` currently supports **macOS only**
-> (arm64 + x64). On Windows/Linux, rely on the `Positron API Tests` GitHub
-> Actions workflow (`.github/workflows/positron-api-tests.yaml`), which runs on
-> every PR and push to `main`. The workflow installs Julia (via
-> `julia-actions/setup-julia`) so runtime discovery has a Julia to find.
+On Linux, Positron needs a display server, so run it under `xvfb-run` when
+headless:
+
+```bash
+xvfb-run -a npm run test-positron
+```
+
+> **Note:** the suite also runs in CI on every PR and push to `main` via the
+> `Positron API Tests` workflow (`.github/workflows/positron-api-tests.yaml`),
+> which installs Julia (via `julia-actions/setup-julia`) so runtime discovery has
+> a Julia to find.
 
 ## The tests
 
