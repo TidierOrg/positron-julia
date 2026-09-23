@@ -49,9 +49,10 @@ export interface JuliaInstallation {
 }
 
 /**
- * Minimum supported Julia version.
+ * Minimum supported Julia version. LanguageServer.jl 5, which the language
+ * server install is pinned to, requires Julia 1.10.
  */
-export const MIN_JULIA_VERSION = '1.9.0';
+export const MIN_JULIA_VERSION = '1.10.0';
 
 /**
  * Validates a Julia installation meets minimum requirements.

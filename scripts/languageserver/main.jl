@@ -85,6 +85,17 @@ catch e
         """
     end
 
+    # Take the module from the failing function: this catch block runs in the
+    # world age from before `using LanguageServer`, so on Julia 1.12+ the
+    # `LanguageServer` binding itself is not visible here yet.
+    if isa(e, MethodError) && nameof(e.f) === :runserver
+        @error """
+        The installed LanguageServer.jl $(pkgversion(parentmodule(e.f))) is not compatible with this version of the Julia for Positron extension, which supports LanguageServer.jl 5.x.
+        Reload the window so the extension can reinstall a compatible version.
+        If the error persists, delete $(first(DEPOT_PATH)) and reload the window.
+        """
+    end
+
     # Exit with error code
     exit(1)
 end

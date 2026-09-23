@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
+import * as semver from 'semver';
 import {
 	LanguageClient,
 	LanguageClientOptions,
@@ -17,6 +18,13 @@ import {
 
 import { LOGGER } from './extension';
 import { JuliaInstallation } from './julia-installation';
+
+/**
+ * LanguageServer.jl releases whose runserver() signature scripts/languageserver/main.jl
+ * calls; 6.0 removed its depot_path argument. Keep in sync with the version pin in
+ * scripts/languageserver/install.jl.
+ */
+const SUPPORTED_LS_VERSIONS = '>=5.0.0 <6.0.0';
 
 /**
  * Manages the Julia Language Server client.
@@ -47,6 +55,15 @@ export class JuliaLanguageClient implements vscode.Disposable {
 		const versionMatch = installation.version.match(/^(\d+\.\d+)/);
 		const minorVersion = versionMatch ? versionMatch[1] : '1.x';
 		return path.join(this._extensionPath, 'lsdepot', `v${minorVersion}`);
+	}
+
+	/**
+	 * Returns the environment inside the language server depot that install.jl
+	 * installs into and that main.jl loads LanguageServer.jl from (its `@v#.#`).
+	 */
+	private getLsEnvPath(installation: JuliaInstallation): string {
+		const minorVersion = installation.version.match(/^(\d+\.\d+)/)?.[1] || '1.x';
+		return path.join(this.getLsDepotPath(installation), 'environments', `v${minorVersion}`);
 	}
 
 	private findNearestProjectDir(startPath: string): string | undefined {
@@ -139,9 +156,7 @@ export class JuliaLanguageClient implements vscode.Disposable {
 	 * Checks if LanguageServer.jl is installed in the depot for this Julia version.
 	 */
 	private isLanguageServerInstalled(installation: JuliaInstallation): boolean {
-		const depotPath = this.getLsDepotPath(installation);
-		const minorVersion = installation.version.match(/^(\d+\.\d+)/)?.[1] || '1.x';
-		const envPath = path.join(depotPath, 'environments', `v${minorVersion}`);
+		const envPath = this.getLsEnvPath(installation);
 		const projectPath = path.join(envPath, 'Project.toml');
 		const manifestPath = path.join(envPath, 'Manifest.toml');
 
@@ -152,7 +167,28 @@ export class JuliaLanguageClient implements vscode.Disposable {
 		// Both LanguageServer and SymbolServer must be direct deps in Project.toml.
 		// In Julia 1.9+, `using X` fails for packages that are only transitive deps.
 		const project = fs.readFileSync(projectPath, 'utf8');
-		return project.includes('LanguageServer') && project.includes('SymbolServer');
+		if (!project.includes('LanguageServer') || !project.includes('SymbolServer')) {
+			return false;
+		}
+
+		// A depot installed without the version pin can hold a LanguageServer.jl
+		// whose runserver() main.jl cannot call. Report it as missing so the
+		// install step moves it back into the supported range.
+		const version = this.installedLanguageServerVersion(manifestPath);
+		if (!version || !semver.satisfies(version, SUPPORTED_LS_VERSIONS)) {
+			LOGGER.info(`LanguageServer.jl ${version ?? '(unknown version)'} in ${envPath} is outside ${SUPPORTED_LS_VERSIONS}; reinstalling`);
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Reads the LanguageServer.jl version recorded in a Manifest.toml.
+	 */
+	private installedLanguageServerVersion(manifestPath: string): string | undefined {
+		const manifest = fs.readFileSync(manifestPath, 'utf8');
+		const entry = manifest.split(/^\[\[deps\./m).find(block => block.startsWith('LanguageServer]]'));
+		return entry?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 	}
 
 	/**
@@ -160,9 +196,10 @@ export class JuliaLanguageClient implements vscode.Disposable {
 	 */
 	private async installLanguageServer(installation: JuliaInstallation): Promise<void> {
 		const depotPath = this.getLsDepotPath(installation);
+		const envPath = this.getLsEnvPath(installation);
 
-		// Ensure depot directory exists
-		fs.mkdirSync(depotPath, { recursive: true });
+		// Ensure the depot and its environment directory exist
+		fs.mkdirSync(envPath, { recursive: true });
 
 		const installScript = path.join(
 			this._extensionPath,
@@ -184,7 +221,9 @@ export class JuliaLanguageClient implements vscode.Disposable {
 				const proc = cp.spawn(installation.binpath, [
 					'--startup-file=no',
 					'--history-file=no',
-					'--project=@.',
+					// Install into the environment isLanguageServerInstalled() checks,
+					// regardless of the extension host's working directory.
+					`--project=${envPath}`,
 					installScript
 				], {
 					env: {

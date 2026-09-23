@@ -21,16 +21,24 @@ using Pkg
 # falls back to interpreting the buggy source on every LS startup instead of
 # failing once at install time.
 withenv("JULIA_PKG_PRECOMPILE_AUTO" => "0") do
-	packages = ["LanguageServer", "SymbolServer"]
+	# main.jl passes runserver() a depot_path argument, which LanguageServer.jl
+	# 5.x accepts and 6.0 removed. Keep this range in sync with
+	# SUPPORTED_LS_VERSIONS in src/lsp.ts.
+	packages = [
+		Pkg.PackageSpec(name="LanguageServer", version="5"),
+		Pkg.PackageSpec(name="SymbolServer"),
+	]
 	for pkg in packages
-		@info "Installing $pkg..."
+		@info "Installing $(pkg.name)..."
 		try
 			Pkg.add(pkg)
 		catch e
-			@error "Failed to install $pkg" exception=(e, catch_backtrace())
+			@error "Failed to install $(pkg.name)" exception=(e, catch_backtrace())
 			exit(1)
 		end
 	end
+	# Record the bound in the environment so any later resolve keeps it.
+	Pkg.compat("LanguageServer", "5")
 end
 
 # SymbolServer.jl re-declares the `jl_module_names` ccall itself instead of
