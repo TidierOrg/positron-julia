@@ -10,3 +10,7 @@ node_modules/**
 *.vsix
 README_files/**
 .code-review-graph/**
+plans/**
+.claude/**
+TODO.md
+lsdepot/**
