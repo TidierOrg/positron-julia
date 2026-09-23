@@ -46,7 +46,45 @@ jobs:
       - name: Setup Julia
         uses: julia-actions/setup-julia@v2
         with:
-          version: '1.10'
+          # Matches julia_version recorded in julia/Positron/Manifest.toml so the
+          # manifest-freshness check below validates the configuration we ship.
+          version: '1.12'
+
+      - name: Check bundled Manifest is current
+        run: |
+          julia --startup-file=no -e '
+            using Pkg, TOML
+            env = Pkg.Types.EnvCache(joinpath("julia","Positron","Project.toml"))
+            h = string(Pkg.Types.workspace_resolve_hash(env))
+            m = TOML.parsefile(joinpath("julia","Positron","Manifest.toml"))
+            recorded = get(m, "project_hash", "")
+            h == recorded || error("julia/Positron/Manifest.toml is stale. Run: julia --project=julia/Positron -e \"using Pkg; Pkg.resolve()\"")
+            println("Manifest current (", length(m["deps"]), " entries)")'
 
       - name: Run Positron.jl tests
         run: julia --project=./julia/Positron -e 'using Pkg; Pkg.test()'
+
+      - name: IJulia unbuilt-state recovery
+        env:
+          JULIA_DEPOT_PATH: ${{ runner.temp }}/pj-depot
+        run: |
+          julia --startup-file=no --project=julia/Positron -e 'using Pkg; Pkg.instantiate()'
+          rm -f "$JULIA_DEPOT_PATH"/packages/IJulia/*/deps/deps.jl
+          rm -rf "$JULIA_DEPOT_PATH"/compiled/*/IJulia
+          # Mirrors the recovery path in getKernelStartupCode() (src/kernel-spec.ts).
+          # Keep both in sync: this proves the bootstrap Julia the extension
+          # ships actually repairs an unbuilt IJulia depot.
+          julia --startup-file=no --project=julia/Positron -e '
+            using Pkg
+            try
+                @eval import IJulia
+                error("precondition failed: IJulia imported despite missing deps.jl")
+            catch e
+                e isa ErrorException && startswith(sprint(showerror, e), "precondition") && rethrow(e)
+            end
+            Pkg.instantiate()
+            withenv("IJULIA_NODEFAULTKERNEL" => "1") do
+                Pkg.build("IJulia")
+            end
+            @eval import IJulia
+            println("recovered")'

@@ -43,6 +43,23 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 
 On first launch, the extension automatically installs required Julia packages (`IJulia`, `LanguageServer.jl`, and supporting dependencies). This one-time setup may take a few minutes.
 
+## Troubleshooting
+
+**`ERROR: LoadError: IJulia not properly installed. Please run Pkg.build("IJulia")` at session start**
+
+Fixed as of this release — the kernel bootstrap now detects an unbuilt `IJulia` and builds it automatically on the next session start, no manual steps needed.
+
+If you're on an older version and hit this now, run the suggested command yourself in a plain Julia terminal (not `sudo julia` — a normal user can write the required file, and `sudo` leaves root-owned files behind in your Julia depot):
+
+```bash
+julia --project="<extension install dir>/julia/Positron" -e 'using Pkg; Pkg.instantiate(); Pkg.build("IJulia")'
+```
+
+Then restart the Julia console session in Positron. Find `<extension install dir>` from the path in the error message itself (it's printed as part of the stacktrace).
+
+> [!NOTE]
+> As of this release, the extension no longer registers a Julia kernel in your global Jupyter data directory as a side effect of this build step — Positron launches the kernel itself and never used that registration. If you also use `IJulia` outside Positron (e.g. JupyterLab) and want that kernel registered, run `julia -e 'using Pkg; Pkg.build("IJulia")'` in your own environment.
+
 ## Missing Package Prompts
 
 When your Julia code references a package that isn't installed, Positron can offer to install it in three places:
