@@ -32,7 +32,7 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 ## Requirements
 
 - [Positron IDE](https://github.com/posit-dev/positron) 
-- [Julia](https://julialang.org/downloads/) 
+- [Julia](https://julialang.org/downloads/) 1.10 or newer
 - [IJulia](https://github.com/JuliaLang/IJulia.jl) installed in your global package environment (e.g. "1.12") 
 
 ## Getting Started
@@ -42,6 +42,35 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 3. Open a `.jl` file or start a Julia console session from the interpreter picker.
 
 On first launch, the extension automatically installs required Julia packages (`IJulia`, `LanguageServer.jl`, and supporting dependencies). This one-time setup may take a few minutes.
+
+## Troubleshooting
+
+**`MethodError: no method matching runserver(...)` when the language server starts**
+
+Fixed in 0.2.5. LanguageServer.jl 6.0 changed the arguments of `runserver`, and versions up to 0.2.4 installed whichever LanguageServer.jl release was newest, so the language server crashed on every fresh install on Julia 1.11 or newer. The extension now installs LanguageServer.jl 5.x, and repairs an incompatible install automatically on the next start.
+
+If you can't upgrade yet, pin LanguageServer.jl 5 in the extension's own depot, then reload the window:
+
+```bash
+JULIA_DEPOT_PATH="<lsdepot>" julia --startup-file=no --project="<lsdepot>/environments/v<minor>" -e 'using Pkg; Pkg.add(name="LanguageServer", version="5"); Pkg.compat("LanguageServer", "5"); Pkg.precompile()'
+```
+
+`<lsdepot>` is the `LS depot` path printed at the top of the Julia Language Server output, for example `~/.positron/extensions/ntluong95.positron-julia-0.2.4/lsdepot/v1.12` (over Remote SSH it's under `~/.positron-server/extensions/`). `<minor>` is your Julia version, for example `1.12`.
+
+**`ERROR: LoadError: IJulia not properly installed. Please run Pkg.build("IJulia")` at session start**
+
+Fixed as of this release — the kernel bootstrap now detects an unbuilt `IJulia` and builds it automatically on the next session start, no manual steps needed.
+
+If you're on an older version and hit this now, run the suggested command yourself in a plain Julia terminal (not `sudo julia` — a normal user can write the required file, and `sudo` leaves root-owned files behind in your Julia depot):
+
+```bash
+julia --project="<extension install dir>/julia/Positron" -e 'using Pkg; Pkg.instantiate(); Pkg.build("IJulia")'
+```
+
+Then restart the Julia console session in Positron. Find `<extension install dir>` from the path in the error message itself (it's printed as part of the stacktrace).
+
+> [!NOTE]
+> As of this release, the extension no longer registers a Julia kernel in your global Jupyter data directory as a side effect of this build step — Positron launches the kernel itself and never used that registration. If you also use `IJulia` outside Positron (e.g. JupyterLab) and want that kernel registered, run `julia -e 'using Pkg; Pkg.build("IJulia")'` in your own environment.
 
 ## Missing Package Prompts
 

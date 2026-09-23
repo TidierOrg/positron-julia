@@ -94,7 +94,8 @@ export function createJuliaKernelSpec(installation: JuliaInstallation, userProje
  *
  * This code:
  * 1. Activates the bundled Positron.jl project
- * 2. Ensures project dependencies are available (instantiates on first run)
+ * 2. Ensures project dependencies are available (instantiates on first run,
+ *    and explicitly builds IJulia if its build never completed)
  * 3. Loads IJulia and Positron.jl services
  * 4. Starts the kernel with IJulia.run_kernel()
  *
@@ -121,6 +122,14 @@ function getKernelStartupCode(): string {
 		end;
 		using Pkg;
 		Pkg.activate("${positronPath}");
+		# Keep the Positron project reachable as a LOAD_PATH fallback even
+		# after we later Pkg.activate() the user's project below. IJulia's
+		# own run_kernel() does an internal "using IJulia", which Julia
+		# resolves against whichever project is active *at that moment* -
+		# not against modules already loaded in memory. Without this, that
+		# internal import fails with "Package IJulia not found in current
+		# path" once we've switched the active project away from here.
+		push!(LOAD_PATH, "${positronPath}");
 
 		function __positron_bootstrap__()
 			local has_ijulia = false
@@ -143,14 +152,47 @@ function getKernelStartupCode(): string {
 
 			if !has_ijulia || !has_positron
 				println("Julia: Installing Positron kernel dependencies (one-time setup)...");
-				Pkg.instantiate();
-				Pkg.precompile();
+				try
+					# IJULIA_NODEFAULTKERNEL skips IJulia's installkernel step,
+					# which writes a kernelspec into the user's global Jupyter
+					# data directory. Positron launches the kernel itself via
+					# its own kernel spec, so that global kernelspec is unused
+					# here. This wraps Pkg.instantiate() too, since a fresh
+					# depot downloads and builds IJulia right there, not only
+					# in the repair branch below.
+					withenv("IJULIA_NODEFAULTKERNEL" => "1") do
+						Pkg.instantiate();
 
-				if !has_ijulia
-					@eval import IJulia
-				end
-				if !has_positron
-					@eval using Positron
+						if !has_ijulia
+							# Pkg.instantiate() only runs build scripts for
+							# packages it downloads in this same call. A depot
+							# that already has an IJulia source tree but never
+							# finished building it (e.g. an earlier build that
+							# failed partway) is therefore never repaired by
+							# instantiate alone, and "import IJulia" keeps
+							# failing with "IJulia not properly installed" on
+							# every restart. Build it explicitly so the kernel
+							# self-heals.
+							# Mirrored by the "IJulia unbuilt-state recovery"
+							# CI step in .github/workflows/ci.yml — keep both
+							# in sync.
+							Pkg.build("IJulia");
+						end
+
+						Pkg.precompile();
+					end
+
+					if !has_ijulia
+						@eval import IJulia
+					end
+					if !has_positron
+						@eval using Positron
+					end
+				catch e
+					println(stderr, "Julia: Positron kernel setup failed.");
+					println(stderr, "Try running this in a Julia terminal, then restart the session:");
+					println(stderr, "  julia --project=\\"${positronPath}\\" -e 'using Pkg; Pkg.instantiate(); Pkg.build(\\"IJulia\\")'");
+					rethrow(e)
 				end
 			end
 		end
