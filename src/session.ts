@@ -21,6 +21,7 @@ import {
   isPkgReplPrompt,
   setJuliaPkgReplModeContext,
 } from "./pkg-repl-console-state";
+import { getInlineResults } from "./inline-results";
 
 interface RuntimeResourceUsage {
   [key: string]: unknown;
@@ -264,6 +265,7 @@ export class JuliaSession
     this._kernel.onDidReceiveRuntimeMessage(
       (msg: positron.LanguageRuntimeMessage) => {
         this.updatePkgReplModeContext(msg);
+        getInlineResults()?.onRuntimeMessage(msg);
         this._rawMessageEmitter.fire(msg);
         if (!this._suppressedExecutionIds.has(msg.parent_id)) {
           this._messageEmitter.fire(msg);
@@ -280,6 +282,13 @@ export class JuliaSession
     );
 
     this._kernel.onDidChangeRuntimeState((state: positron.RuntimeState) => {
+      if (
+        state === positron.RuntimeState.Restarting ||
+        state === positron.RuntimeState.Exited
+      ) {
+        // Inline results describe the state of the session that just ended.
+        getInlineResults()?.onSessionReset(this.metadata.sessionId);
+      }
       if (
         state === positron.RuntimeState.Restarting ||
         state === positron.RuntimeState.Starting
@@ -369,11 +378,16 @@ export class JuliaSession
       throw new Error("Session not started");
     }
 
+    // Code run from an editor comes with its source location (Positron
+    // 2026.02+), which is where its inline result goes.
+    const inlineResults = getInlineResults();
+    inlineResults?.onExecute(id, this.metadata.sessionId, mode, codeLocation);
+
     // Return the supervisor's promise rather than dropping it: for console
     // input Positron (2026.09+) has not checked for completeness, it rejects
     // with `CodeIncompleteError` when the code is incomplete, which is how the
     // console knows to show a continuation prompt instead of losing the input.
-    return this._kernel.execute(
+    const accepted = this._kernel.execute(
       code,
       id,
       mode,
@@ -381,6 +395,10 @@ export class JuliaSession
       codeLocation,
       executionMetadata,
     );
+    if (accepted && inlineResults) {
+      Promise.resolve(accepted).catch(() => inlineResults.onExecuteRejected(id));
+    }
+    return accepted;
   }
 
   isCodeFragmentComplete(

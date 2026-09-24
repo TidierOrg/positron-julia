@@ -16,6 +16,7 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 - **Language Server** — Powered by [LanguageServer.jl](https://github.com/julia-vscode/LanguageServer.jl) for diagnostics, completions, go-to-definition, hover info, and more. Automatically installed on first use.
 - **Runtime Completions** — Supplements LSP completions with live variables and functions from the running Julia session via the Jupyter `complete_request` protocol.
 - **Run Multiline Statements** — Press `Ctrl+Enter` / `Cmd+Enter` to send the full statement at the cursor to the console, wherever the cursor is in it: the first line, a continuation line of a multi-line call, a line inside a `function`/`for`/`if`/`begin` block, or its closing `end`. Handles unclosed brackets, trailing operators and pipe chains, strings and comments, docstrings, and `x[end]`. Inside a `module`, each statement of the module body runs on its own. **Julia: Run Selection** without a selection runs the same statement.
+- **Inline Results** *(optional)* — Mark code you run from the editor with `✓` or `✗`, plus a preview of the value or error, like julia-vscode. Off by default; see [Inline Results](#inline-results).
 - **Semantic Highlighting** — Enhanced syntax highlighting with semantic information from the Language Server for accurate color coding of functions, types, modules, and other language constructs.
 - **Data Explorer** — Open DataFrames, matrices, and other tabular data in Positron's interactive Data Explorer with sorting, filtering, and summary statistics. Convert the current state of the Data Explorer into to Code
 - **Variables Pane** — Browse all session variables with type and value summaries.
@@ -76,6 +77,32 @@ Then restart the Julia console session in Positron. Find `<extension install dir
 > [!NOTE]
 > As of this release, the extension no longer registers a Julia kernel in your global Jupyter data directory as a side effect of this build step — Positron launches the kernel itself and never used that registration. If you also use `IJulia` outside Positron (e.g. JupyterLab) and want that kernel registered, run `julia -e 'using Pkg; Pkg.build("IJulia")'` in your own environment.
 
+## Inline Results
+
+Set `positron.julia.inlineResults.enabled` to `true` to mark code you run from a Julia editor at the end of its last line:
+
+```julia
+using DataFrames                ✓
+DataFrame(x = 1,
+          y = 2)                ✓ 1×2 DataFrame
+z = undefined_thing             ✗ UndefVarError: `undefined_thing` not defined in `Main`
+```
+
+- `⋯` shows while the code is running, then `✓` when it completes or `✗` when it throws an error.
+- The returned value (or the error message) is previewed next to the marker; hover the marker to see it in full. Set `positron.julia.inlineResults.showValue` to `false` to show only `✓` / `✗`.
+- Works with `Ctrl+Enter` / `Cmd+Enter`, running a selection, **Julia: Run Selection**, and the code cell commands. Output still goes to the console as usual.
+- A marker disappears when you edit its code, when the Julia session restarts, or when you run **Julia: Clear Inline Results**.
+
+Markers for `Ctrl+Enter` / `Cmd+Enter` rely on Positron reporting where executed code came from, which needs **Positron 2026.02 or newer**.
+
+```jsonc
+{
+  "positron.julia.inlineResults.enabled": true,
+  // Optional: only show ✓ / ✗, without the value or error message
+  "positron.julia.inlineResults.showValue": false
+}
+```
+
 ## Missing Package Prompts
 
 When your Julia code references a package that isn't installed, Positron can offer to install it in three places:
@@ -119,6 +146,8 @@ Contributed by this extension:
 | `positron.julia.languageServer.enabled`         | `true`  | Enable/disable the Julia Language Server                    |
 | `positron.julia.languageServer.environmentPath` | `""`    | Path to a Julia project environment for the Language Server |
 | `positron.julia.help.importUnimportedPackages`  | `true`  | Allow Help lookups to import installed packages into `Main` |
+| `positron.julia.inlineResults.enabled`          | `false` | Mark code run from the editor with `✓` / `✗` ([Inline Results](#inline-results)) |
+| `positron.julia.inlineResults.showValue`        | `true`  | Preview the value or error message next to inline result markers |
 | `julia.lint.missingrefs`                        | `"all"` | Control missing-reference diagnostics (`all`, `id`, `none`) |
 
 

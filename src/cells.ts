@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import * as positron from 'positron';
+
+import { executeJuliaInConsole } from './inline-results';
 
 const JULIA_LANGUAGE_ID = 'julia';
 
@@ -72,16 +73,10 @@ async function executeCell(shouldMove: boolean): Promise<void> {
 		return;
 	}
 
-	await positron.runtime.executeCode(
-		JULIA_LANGUAGE_ID,
-		code,
-		false,
-		false,
-		positron.RuntimeCodeExecutionMode.Interactive,
-		positron.RuntimeErrorBehavior.Continue,
-		undefined,
-		undefined,
-	);
+	await executeJuliaInConsole(code, {
+		document: editor.document,
+		lines: { startLine: range.start.line, endLine: range.end.line },
+	});
 
 	if (shouldMove) {
 		// Advance cursor past the next cell delimiter

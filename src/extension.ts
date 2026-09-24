@@ -22,6 +22,7 @@ import { TestFeature } from './testing/testFeature';
 import { notifyTypeTextDocumentPublishTests } from './testing/testLSProtocol';
 import { registerDebugFeature } from './debugger/debugFeature';
 import { registerPkgReplConsoleKeybindings } from './pkg-repl-console-keybindings';
+import { registerInlineResults } from './inline-results';
 
 export const LOGGER = vscode.window.createOutputChannel('Julia Language Pack', { log: true });
 
@@ -71,6 +72,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	};
 	context.subscriptions.push(LOGGER.onDidChangeLogLevel(onDidChangeLogLevel));
 	onDidChangeLogLevel(LOGGER.logLevel);
+
+	// Inline execution results (opt-in; issue #40). Registered before the
+	// runtime manager so sessions created or restored later can report to it.
+	registerInlineResults(context);
 
 	// Create and register the Julia runtime manager
 	const juliaRuntimeManager = new JuliaRuntimeManager(context);
