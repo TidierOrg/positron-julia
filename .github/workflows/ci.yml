@@ -27,6 +27,9 @@ jobs:
       - name: Compile extension
         run: npm run compile
 
+      - name: Unit tests
+        run: npx mocha --ui tdd "out/test/unit/**/*.test.js"
+
       - name: Package VSIX
         run: npm run package
 

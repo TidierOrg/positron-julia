@@ -597,6 +597,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
+    "test:unit": "npm run compile && mocha --ui tdd \"out/test/unit/**/*.test.js\"",
     "package": "vsce package",
     "test:julia": "julia --project=./julia/Positron -e \"using Pkg; Pkg.test()\"",
     "pretest-positron": "npm run compile",
