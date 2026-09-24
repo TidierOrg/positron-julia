@@ -45,6 +45,10 @@ On first launch, the extension automatically installs required Julia packages (`
 
 ## Troubleshooting
 
+**Pressing Enter on an incomplete line in the console (e.g. `function f(x)`) clears it and runs nothing**
+
+Fixed in 0.2.6. From Positron 2026.09, the Julia session checks console input for completeness itself, and versions up to 0.2.5 dropped the "incomplete" answer, so Positron treated the input as run. The console now shows a continuation prompt again.
+
 **`MethodError: no method matching runserver(...)` when the language server starts**
 
 Fixed in 0.2.5. LanguageServer.jl 6.0 changed the arguments of `runserver`, and versions up to 0.2.4 installed whichever LanguageServer.jl release was newest, so the language server crashed on every fresh install on Julia 1.11 or newer. The extension now installs LanguageServer.jl 5.x, and repairs an incompatible install automatically on the next start.

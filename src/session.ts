@@ -362,11 +362,25 @@ export class JuliaSession
     id: string,
     mode: positron.RuntimeCodeExecutionMode,
     errorBehavior: positron.RuntimeErrorBehavior,
-  ): void {
+    codeLocation?: positron.Utf8Location,
+    executionMetadata?: Record<string, any>,
+  ): Thenable<void> | void {
     if (!this._kernel) {
       throw new Error("Session not started");
     }
-    this._kernel.execute(code, id, mode, errorBehavior);
+
+    // Return the supervisor's promise rather than dropping it: for console
+    // input Positron (2026.09+) has not checked for completeness, it rejects
+    // with `CodeIncompleteError` when the code is incomplete, which is how the
+    // console knows to show a continuation prompt instead of losing the input.
+    return this._kernel.execute(
+      code,
+      id,
+      mode,
+      errorBehavior,
+      codeLocation,
+      executionMetadata,
+    );
   }
 
   isCodeFragmentComplete(
