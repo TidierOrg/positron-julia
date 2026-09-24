@@ -9,6 +9,9 @@ import * as positron from "positron";
 import { JuliaRuntimeManager } from "./runtime-manager";
 import { createNewPackage } from "./create-package";
 import { LOGGER, getLanguageClient, restartLanguageServer } from "./extension";
+import { executeJuliaInConsole } from "./inline-results";
+import { executedLineRange, LineRange } from "./inline-results-model";
+import { juliaStatementAt, statementDocumentRange } from "./statement-range";
 
 const JULIA_LANGUAGE_ID = "julia";
 const JULIA_RUN_FILE_COMMAND = "julia.runFile";
@@ -84,16 +87,26 @@ async function runSelection(editor: vscode.TextEditor): Promise<void> {
     return;
   }
 
-  const code = editor.selection.isEmpty
-    ? document.lineAt(editor.selection.active.line).text
-    : document.getText(editor.selection);
+  // Without a selection, run the whole statement at the cursor, as
+  // Ctrl+Enter / Cmd+Enter does, so multi-line calls and blocks run complete.
+  let code = "";
+  let lines: LineRange | undefined;
+  if (editor.selection.isEmpty) {
+    lines = juliaStatementAt(document, editor.selection.active.line);
+    if (lines) {
+      code = document.getText(statementDocumentRange(document, lines));
+    }
+  } else {
+    code = document.getText(editor.selection);
+    lines = executedLineRange(editor.selection);
+  }
 
   if (!code.trim()) {
     vscode.window.showWarningMessage("No code selected to run");
     return;
   }
 
-  await executeJuliaCode(code);
+  await executeJuliaInConsole(code, lines && { document, lines });
 }
 
 let outlineIsVisible = false;

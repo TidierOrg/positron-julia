@@ -2,7 +2,7 @@
   "name": "positron-julia",
   "displayName": "Julia for Positron",
   "description": "Julia language support for Positron IDE",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "publisher": "ntluong95",
   "author": "TidierOrg, rdboyes, ntluong95",
   "contributors": [
@@ -53,6 +53,7 @@
     "onCommand:julia.stopTestController",
     "onCommand:julia.runEditorContents",
     "onCommand:julia.debugEditorContents",
+    "onCommand:julia.clearInlineResults",
     "onDebugInitialConfigurations",
     "onDebugResolve:julia"
   ],
@@ -228,6 +229,11 @@
         "category": "Julia",
         "title": "Debug File in Julia",
         "icon": "$(debug-alt)"
+      },
+      {
+        "command": "julia.clearInlineResults",
+        "category": "Julia",
+        "title": "Clear Inline Results"
       }
     ],
     "debuggers": [
@@ -364,6 +370,16 @@
           "default": true,
           "scope": "window",
           "markdownDescription": "Allow Julia Help to import installed packages into `Main` when resolving documentation for packages that have not been imported. Restart the Julia session after changing this setting."
+        },
+        "positron.julia.inlineResults.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Mark code run from a Julia editor (`Ctrl+Enter`/`Cmd+Enter`, a selection, or a code cell) at the end of its last line: `✓` when it completes, `✗` when it throws an error. A marker clears when its code is edited, when the Julia session restarts, or with **Julia: Clear Inline Results**. Markers for `Ctrl+Enter`/`Cmd+Enter` need Positron 2026.02 or newer."
+        },
+        "positron.julia.inlineResults.showValue": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a one-line preview of the returned value (or the error message) after the inline result marker. Hover the marker to see it in full. Applies when `#positron.julia.inlineResults.enabled#` is on."
         },
         "positron.julia.semanticHighlighting.enabled": {
           "type": "boolean",
@@ -597,6 +613,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "lint": "eslint src --ext ts",
+    "test:unit": "npm run compile && mocha --ui tdd \"out/test/unit/**/*.test.js\"",
     "package": "vsce package",
     "test:julia": "julia --project=./julia/Positron -e \"using Pkg; Pkg.test()\"",
     "pretest-positron": "npm run compile",
