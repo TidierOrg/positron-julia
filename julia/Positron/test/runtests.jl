@@ -59,4 +59,8 @@ include("test_helpers.jl")
     @testset "Plots System" begin
         include("test_plots.jl")
     end
+
+    @testset "Profiler" begin
+        include("test_profile.jl")
+    end
 end

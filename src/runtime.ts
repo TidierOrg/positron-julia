@@ -83,6 +83,12 @@ export function createJuliaRuntimeMetadata(
 		base64EncodedIconSvg: getJuliaRuntimeIconBase64(extensionPath),
 		sessionLocation: getSessionLocation(),
 		startupBehavior: getStartupBehavior(installation),
+		// Discovered binaries are real, workspace-independent installations
+		// (launchers are resolved in `createJuliaInstallation`), so Positron may
+		// reuse them across windows. The `positron.julia.executablePath`
+		// runtime is workspace-specific and comes from
+		// `recommendedWorkspaceRuntime()` instead.
+		cacheable: installation.reasonDiscovered !== ReasonDiscovered.USER_SETTING,
 		extraRuntimeData: {
 			homepath: installation.homepath,
 			arch: installation.arch,

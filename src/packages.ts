@@ -244,7 +244,7 @@ export class JuliaPackageManager
     this._firePackagesChanged(names);
   }
 
-  async updateAllPackages(token?: vscode.CancellationToken): Promise<string[]> {
+  async updateAllPackages(token?: vscode.CancellationToken): Promise<void> {
     await this.sourcePackagesScript();
     const packagesBefore = await this._listPackagesFromRuntime(token);
 
@@ -255,7 +255,7 @@ export class JuliaPackageManager
     );
 
     if (token?.isCancellationRequested) {
-      return [];
+      return;
     }
 
     const packagesAfter = await this._listPackagesFromRuntime(token);
@@ -265,8 +265,6 @@ export class JuliaPackageManager
     );
 
     this._firePackagesChanged(changedPackageNames);
-
-    return changedPackageNames;
   }
 
   async searchPackages(

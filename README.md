@@ -16,6 +16,8 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 - **Language Server** — Powered by [LanguageServer.jl](https://github.com/julia-vscode/LanguageServer.jl) for diagnostics, completions, go-to-definition, hover info, and more. Automatically installed on first use.
 - **Runtime Completions** — Supplements LSP completions with live variables and functions from the running Julia session via the Jupyter `complete_request` protocol.
 - **Run Multiline Statements** — Press `Ctrl+Enter` / `Cmd+Enter` to send the full statement at the cursor to the console, wherever the cursor is in it: the first line, a continuation line of a multi-line call, a line inside a `function`/`for`/`if`/`begin` block, or its closing `end`. Handles unclosed brackets, trailing operators and pipe chains, strings and comments, docstrings, and `x[end]`. Inside a `module`, each statement of the module body runs on its own. **Julia: Run Selection** without a selection runs the same statement.
+- **Run Several Statements at Once** — Code pasted into the console, or run from a Quarto cell, runs one statement at a time: each statement's output appears as it finishes, the Quarto gutter shows which statement is running, and execution stops at the first error. A `module … end` block always runs as one input. Needs Positron 2026.09 for the console; Quarto progress works from 2026.08.
+- **Profiler** — `@profview expr` in the Julia console profiles `expr` and shows a flame graph; Ctrl/Cmd+click a frame to open its source line. **Julia: Profile Selection** (editor context menu) profiles the selection or the statement at the cursor, and **Julia: Next / Previous / Delete Profile** move through the last 20 profiles. `@profview expr C = true` also shows C frames.
 - **Inline Results** *(optional)* — Mark code you run from the editor with `✓` or `✗`, plus a preview of the value or error, like julia-vscode. Off by default; see [Inline Results](#inline-results).
 - **Semantic Highlighting** — Enhanced syntax highlighting with semantic information from the Language Server for accurate color coding of functions, types, modules, and other language constructs.
 - **Data Explorer** — Open DataFrames, matrices, and other tabular data in Positron's interactive Data Explorer with sorting, filtering, and summary statistics. Convert the current state of the Data Explorer into to Code
@@ -23,6 +25,9 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 - **Help Integration** — View Julia documentation inline via Positron's Help pane.
 - **Plots** — Julia plots are captured and displayed in Positron's Plots pane.
 - **Package Pane** — Browse and manage Julia packages directly within Positron.
+- **Project Environments** — The status bar shows the active Julia project; click it to switch. The console, language server, and new terminals all use the same project. A folder without a `Project.toml` uses your global environment (`@v1.x`) unless you choose **Activate '<folder>' as a new project**, which makes it the project (Pkg creates `Project.toml` on the first `add`).
+- **Terminals Match the Console** — New integrated terminals put the Julia console's `julia` first on `PATH` and set `JULIA_PROJECT` to its project, so `julia` in a terminal is the same Julia and project as the console (`positron.julia.terminal.useConsoleEnvironment`).
+- **Interpreter Setup** — Julia versions installed with juliaup, on `PATH`, or in standard locations are found automatically and cached by Positron between windows, so startup doesn't search for them again. The Start Session menu offers **Install Julia via juliaup** when juliaup is missing, and **Activate Julia Project Environment…**.
 - **Pkg REPL Mode** — Type `]` at an empty console prompt to switch to `pkg>`, run Pkg commands like `status` or `add DataFrames`, and press Backspace at an empty `pkg>` prompt to return to `julia>`. One-shot commands (`] add DataFrames`) work too.
 - **Create New Package** — Scaffold a new package with [PkgTemplates.jl](https://github.com/JuliaCI/PkgTemplates.jl) via `Julia: Create New Package` in the command palette: tests and README always included, plus optional git repository, MIT license, GitHub Actions CI, and Documenter docs.
 - **TestItem Compatible** - Uses the same testing system as `julia-vscode`
@@ -32,7 +37,7 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 
 ## Requirements
 
-- [Positron IDE](https://github.com/posit-dev/positron) 
+- [Positron IDE](https://github.com/posit-dev/positron) 2026.08 or newer
 - [Julia](https://julialang.org/downloads/) 1.10 or newer
 - [IJulia](https://github.com/JuliaLang/IJulia.jl) installed in your global package environment (e.g. "1.12") 
 
@@ -45,6 +50,14 @@ Julia language support for [Positron](https://github.com/posit-dev/positron). Ba
 On first launch, the extension automatically installs required Julia packages (`IJulia`, `LanguageServer.jl`, and supporting dependencies). This one-time setup may take a few minutes.
 
 ## Troubleshooting
+
+**Only one Julia version shows up, although juliaup has several channels installed**
+
+Fixed in 0.2.7. Versions up to 0.2.6 asked juliaup for each channel's binary with `juliaup which`, which juliaup 1.19 doesn't have, so only the `julia` on `PATH` (and Julia installed in standard locations) was found. The extension now reads juliaup's `juliaup.json` directly. After upgrading, you may need to pick your Julia interpreter once, because the juliaup launcher is now listed as the Julia version it starts.
+
+**The console uses a different project than the folder I opened (issue #29)**
+
+Changed in 0.2.7. The extension no longer looks for a `Project.toml` above the folder you opened: a folder inside another project uses your global environment, and the status bar, console, and language server agree on it. To use the opened folder as a project, click the environment in the status bar and choose **Activate '<folder>' as a new project**; to use the parent project, pick it from the same list.
 
 **Pressing Enter on an incomplete line in the console (e.g. `function f(x)`) clears it and runs nothing**
 
@@ -146,6 +159,7 @@ Contributed by this extension:
 | `positron.julia.languageServer.enabled`         | `true`  | Enable/disable the Julia Language Server                    |
 | `positron.julia.languageServer.environmentPath` | `""`    | Path to a Julia project environment for the Language Server |
 | `positron.julia.help.importUnimportedPackages`  | `true`  | Allow Help lookups to import installed packages into `Main` |
+| `positron.julia.terminal.useConsoleEnvironment` | `true` | New terminals use the Julia console's Julia and project (`JULIA_PROJECT`) |
 | `positron.julia.inlineResults.enabled`          | `false` | Mark code run from the editor with `✓` / `✗` ([Inline Results](#inline-results)) |
 | `positron.julia.inlineResults.showValue`        | `true`  | Preview the value or error message next to inline result markers |
 | `julia.lint.missingrefs`                        | `"all"` | Control missing-reference diagnostics (`all`, `id`, `none`) |
@@ -169,6 +183,10 @@ This project is dual-licensed, reflecting its two main sources of code:
   - `src/testing/testControllerProtocol.ts`, `src/testing/testLSProtocol.ts`,
     `src/testing/testFeature.ts`
   - `src/debugger/debugFeature.ts`
+  - `julia/Positron/src/profile.jl` (the `@profview` profile serializer)
+  - `resources/profiler/profile-viewer.js`, the flame graph renderer from
+    [jl-profile.js](https://github.com/pfitzseb/jl-profile.js) (MIT); see
+    `resources/profiler/NOTICE`
   - `scripts/debugger/run_debugger.jl`,
     `scripts/apps/testitemcontroller_main.jl`, and the bundled
     `scripts/environments/testitemcontroller/` project files

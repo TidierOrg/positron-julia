@@ -8,6 +8,7 @@ import * as positron from "positron";
 
 import { LOGGER, supervisorApi } from "./extension";
 import { JuliaInstallation } from "./julia-installation";
+import { runtimeArchitecture } from "./julia-discovery";
 import {
   JupyterLanguageRuntimeSession,
   JupyterKernelSpec,
@@ -22,10 +23,6 @@ import {
   setJuliaPkgReplModeContext,
 } from "./pkg-repl-console-state";
 import { getInlineResults } from "./inline-results";
-
-interface RuntimeResourceUsage {
-  [key: string]: unknown;
-}
 
 /**
  * Represents a Julia runtime session.
@@ -68,14 +65,14 @@ export class JuliaSession
   private readonly _exitEmitter =
     new vscode.EventEmitter<positron.LanguageRuntimeExit>();
   private readonly _resourceUsageEmitter =
-    new vscode.EventEmitter<RuntimeResourceUsage>();
+    new vscode.EventEmitter<positron.RuntimeResourceUsage>();
 
   /** Events */
   onDidReceiveRuntimeMessageRaw: vscode.Event<positron.LanguageRuntimeMessage>;
   onDidReceiveRuntimeMessage: vscode.Event<positron.LanguageRuntimeMessage>;
   onDidChangeRuntimeState: vscode.Event<positron.RuntimeState>;
   onDidEndSession: vscode.Event<positron.LanguageRuntimeExit>;
-  onDidUpdateResourceUsage: vscode.Event<RuntimeResourceUsage>;
+  onDidUpdateResourceUsage: vscode.Event<positron.RuntimeResourceUsage>;
 
   get installation(): JuliaInstallation {
     return this._installation;
@@ -321,14 +318,14 @@ export class JuliaSession
     // Positron may provide resource usage updates from supervisor sessions.
     const kernelWithResourceUsage = this._kernel as unknown as {
       onDidUpdateResourceUsage?: (
-        listener: (usage: RuntimeResourceUsage) => void,
+        listener: (usage: positron.RuntimeResourceUsage) => void,
       ) => void;
     };
     if (
       typeof kernelWithResourceUsage.onDidUpdateResourceUsage === "function"
     ) {
       kernelWithResourceUsage.onDidUpdateResourceUsage(
-        (usage: RuntimeResourceUsage) => {
+        (usage: positron.RuntimeResourceUsage) => {
           this._resourceUsageEmitter.fire(usage);
         },
       );
@@ -339,6 +336,10 @@ export class JuliaSession
     this.runtimeInfo = {
       ...info,
       banner: this.buildJuliaStartupBanner(info),
+      // Lets Positron warn about e.g. x64 Julia under Rosetta on Apple Silicon.
+      interpreterArch: runtimeArchitecture(
+        this._installation.arch,
+      ) as positron.LanguageRuntimeArchitecture,
     };
 
     // Fallback for restored sessions where a Ready transition may have already occurred.

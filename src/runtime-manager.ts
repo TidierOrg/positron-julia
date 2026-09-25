@@ -8,9 +8,11 @@ import * as positron from 'positron';
 import * as semver from 'semver';
 
 import { LOGGER, supervisorApi, ensureLanguageServerForVersion } from './extension';
-import { juliaRuntimeDiscoverer } from './provider';
+import { discoverFromConfiguredPath, juliaRuntimeDiscoverer } from './provider';
 import { JuliaSession } from './session';
-import { JuliaInstallation, ReasonDiscovered } from './julia-installation';
+import { JuliaInstallation, ReasonDiscovered, isValidJuliaInstallation } from './julia-installation';
+import { discoveryRootEntries } from './julia-discovery';
+import { resolveWorkspaceJuliaProject } from './environment';
 import { createJuliaRuntimeMetadata, getJuliaRuntimeIconBase64 } from './runtime';
 import { createJuliaKernelSpec } from './kernel-spec';
 
@@ -44,11 +46,15 @@ export class JuliaRuntimeManager implements positron.LanguageRuntimeManager {
 	}
 
 	/**
-	 * Best Julia installation for auxiliary tooling (e.g. the create-package
-	 * command): the active session's installation, else the first discovered
-	 * one.
+	 * Best Julia installation for auxiliary tooling (the language server, the
+	 * create-package command): the active session's installation, else one
+	 * found this window, else Positron's preferred Julia runtime, else the
+	 * first one discovery finds.
+	 *
+	 * On a warm start Positron may skip discovery and register cached runtimes
+	 * directly, so `_installations` can be empty even though Julia is known.
 	 */
-	getPreferredInstallation(): JuliaInstallation | undefined {
+	async getPreferredInstallation(): Promise<JuliaInstallation | undefined> {
 		const session = this.getActiveJuliaSession();
 		if (session) {
 			return session.installation;
@@ -56,17 +62,43 @@ export class JuliaRuntimeManager implements positron.LanguageRuntimeManager {
 		for (const installation of this._installations.values()) {
 			return installation;
 		}
+		try {
+			const preferred = await positron.runtime.getPreferredRuntime('julia');
+			if (preferred) {
+				return this.getOrReconstructInstallation(preferred);
+			}
+		} catch (error) {
+			LOGGER.debug(`No preferred Julia runtime from Positron: ${error}`);
+		}
+		for await (const installation of juliaRuntimeDiscoverer()) {
+			return installation;
+		}
 		return undefined;
 	}
 
-	/** Recommended runtime for the current workspace */
-	private _recommendedRuntime: positron.LanguageRuntimeMetadata | undefined;
+	/**
+	 * The runtime from `positron.julia.executablePath`, if set. Positron calls
+	 * this on every start, before (and even without) discovery, so the
+	 * workspace's configured Julia is offered even when cached runtimes let
+	 * Positron skip discovery.
+	 */
+	async recommendedWorkspaceRuntime(): Promise<positron.LanguageRuntimeMetadata | undefined> {
+		const installation = await discoverFromConfiguredPath();
+		if (!installation || !isValidJuliaInstallation(installation)) {
+			return undefined;
+		}
+		const metadata = createJuliaRuntimeMetadata(installation, this._context.extensionPath);
+		this._installations.set(metadata.runtimeId, installation);
+		return metadata;
+	}
 
 	/**
-	 * Returns the recommended runtime for the current workspace.
+	 * Fingerprint of the locations discovery searches, one `stat` each.
+	 * Positron reruns discovery on startup only when this changes (or the
+	 * cache is old), e.g. after `juliaup add` or a new Julia on PATH.
 	 */
-	recommendedWorkspaceRuntime(): Thenable<positron.LanguageRuntimeMetadata | undefined> {
-		return Promise.resolve(this._recommendedRuntime);
+	async getDiscoveryRootSignature(): Promise<positron.RuntimeRootSignature> {
+		return { entries: discoveryRootEntries() };
 	}
 
 	constructor(context: vscode.ExtensionContext) {
@@ -136,17 +168,16 @@ export class JuliaRuntimeManager implements positron.LanguageRuntimeManager {
 		// This handles switching between Julia versions gracefully
 		await ensureLanguageServerForVersion(installation, this._context);
 
-		// Resolve the user's Julia project path: prefer an explicitly saved config
-		// value (set when the user switches environments via the status bar), then
-		// fall back to the first workspace folder so Julia can auto-detect a
-		// Project.toml there.
-		const positronJuliaConfig = vscode.workspace.getConfiguration('positron.julia');
-		const userProjectPath =
-			positronJuliaConfig.get<string>('languageServer.environmentPath') ||
-			vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		// The same project the status bar shows: the environment the user picked,
+		// else the workspace's own project, else the global environment.
+		const project = resolveWorkspaceJuliaProject();
+		if (project.missingSetting) {
+			LOGGER.warn(`Configured Julia environment does not exist: ${project.missingSetting}`);
+		}
+		LOGGER.info(`Julia console project: ${project.path ?? 'global environment'} (${project.reason})`);
 
 		// Create the kernel spec for a new session
-		const kernelSpec = createJuliaKernelSpec(installation, userProjectPath);
+		const kernelSpec = createJuliaKernelSpec(installation, project.path, project.explicit);
 
 		LOGGER.info(`Creating Julia session for ${runtimeMetadata.runtimeName}`);
 		const session = new JuliaSession(

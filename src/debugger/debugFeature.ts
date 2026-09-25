@@ -14,7 +14,6 @@ import { randomUUID } from 'crypto';
 
 import { LOGGER } from '../extension';
 import { JuliaRuntimeManager } from '../runtime-manager';
-import { juliaRuntimeDiscoverer } from '../provider';
 import { JuliaInstallation } from '../julia-installation';
 
 function generatePipeName(id: string, prefix: string): string {
@@ -117,14 +116,11 @@ class InlineDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory 
 	}
 
 	private async getInstallation(): Promise<JuliaInstallation> {
-		const active = this.runtimeManager.getActiveJuliaSession();
-		if (active) {
-			return active.installation;
+		const installation = await this.runtimeManager.getPreferredInstallation();
+		if (!installation) {
+			throw new Error('No Julia installation found for debugging');
 		}
-		for await (const inst of juliaRuntimeDiscoverer()) {
-			return inst;
-		}
-		throw new Error('No Julia installation found for debugging');
+		return installation;
 	}
 }
 

@@ -10,14 +10,17 @@ import { JuliaRuntimeManager } from './runtime-manager';
 import { registerCommands } from './commands';
 import { PositronSupervisorApi } from './positron-supervisor';
 import { JuliaLanguageClient } from './lsp';
-import { juliaRuntimeDiscoverer } from './provider';
 import { registerCompletionProvider, getRuntimeCompletions, ReplCompletionResult } from './completions';
 import { registerStatementRangeProvider } from './statement-range';
+import { registerInputBoundaryProvider } from './input-boundaries';
 import { registerSemanticTokensProvider } from './semantic-highlighting';
 import { registerHelpTopicProvider } from './help';
 import { registerCellCommands } from './cells';
 import { registerQuartoCellCommands } from './quarto-cells';
 import { JuliaEnvironmentManager } from './environment';
+import { registerTerminalEnvironment } from './terminal-environment';
+import { registerRuntimePicker } from './runtime-picker';
+import { registerProfiler } from './profiler/profiler-feature';
 import { TestFeature } from './testing/testFeature';
 import { notifyTypeTextDocumentPublishTests } from './testing/testLSProtocol';
 import { registerDebugFeature } from './debugger/debugFeature';
@@ -31,6 +34,7 @@ let languageServerStarting: Promise<void> | undefined;
 let _context: vscode.ExtensionContext | undefined;
 let _testFeature: import('./testing/testFeature').TestFeature | undefined;
 let _getJuliaSession: () => import('./session').JuliaSession | undefined = () => undefined;
+let _runtimeManager: JuliaRuntimeManager | undefined;
 
 export function getLanguageClient(): JuliaLanguageClient | undefined {
 	return languageClient;
@@ -79,6 +83,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Create and register the Julia runtime manager
 	const juliaRuntimeManager = new JuliaRuntimeManager(context);
+	_runtimeManager = juliaRuntimeManager;
 	context.subscriptions.push(
 		positron.runtime.registerLanguageRuntimeManager('julia', juliaRuntimeManager)
 	);
@@ -98,6 +103,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Register statement range provider (Ctrl+Enter multiline support)
 	registerStatementRangeProvider(context);
 
+	// Register input boundary provider (console input and Quarto cells run
+	// one statement at a time)
+	registerInputBoundaryProvider(context);
+
 	// Register semantic highlighting provider (token-class highlighting)
 	registerSemanticTokensProvider(context);
 
@@ -114,6 +123,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Environment status bar and switching
 	const environmentManager = new JuliaEnvironmentManager();
 	environmentManager.activate(context, getLanguageClient, () => juliaRuntimeManager.getActiveJuliaSession());
+
+	// New terminals use the console's Julia and project
+	registerTerminalEnvironment(context, environmentManager);
+
+	// Julia items in the Start Session picker
+	registerRuntimePicker(context, juliaRuntimeManager);
+
+	// Flame graphs for `@profview` in the Julia console
+	registerProfiler(context);
 
 	// Debug Adapter Protocol — breakpoints, step-through, variable inspection
 	registerDebugFeature(context, juliaRuntimeManager);
@@ -242,13 +260,11 @@ async function doStartLanguageServer(
 	installation?: any,
 	preferredFilePath?: string
 ): Promise<void> {
-	// If no installation provided, find the first available one
+	// If no installation provided, use the preferred one. This avoids a full
+	// discovery pass on warm starts, where Positron reuses cached runtimes.
 	if (!installation) {
-		LOGGER.debug('No installation provided, discovering Julia installations...');
-		for await (const inst of juliaRuntimeDiscoverer()) {
-			installation = inst;
-			break;
-		}
+		LOGGER.debug('No installation provided, using the preferred Julia installation...');
+		installation = await _runtimeManager?.getPreferredInstallation();
 	}
 
 	if (!installation) {
