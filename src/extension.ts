@@ -21,6 +21,7 @@ import { JuliaEnvironmentManager } from './environment';
 import { registerTerminalEnvironment } from './terminal-environment';
 import { registerRuntimePicker } from './runtime-picker';
 import { registerProfiler } from './profiler/profiler-feature';
+import { registerJuliaDataImporters } from './data-import';
 import { TestFeature } from './testing/testFeature';
 import { notifyTypeTextDocumentPublishTests } from './testing/testLSProtocol';
 import { registerDebugFeature } from './debugger/debugFeature';
@@ -132,6 +133,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Flame graphs for `@profview` in the Julia console
 	registerProfiler(context);
+
+	// Julia code for the Import Data dialog (Positron 2026.09+)
+	registerJuliaDataImporters(context);
 
 	// Debug Adapter Protocol — breakpoints, step-through, variable inspection
 	registerDebugFeature(context, juliaRuntimeManager);

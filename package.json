@@ -58,7 +58,8 @@
     "onDebugInitialConfigurations",
     "onDebugResolve:julia",
     "onCommand:julia.openProfiler",
-    "onCommand:julia.profileSelection"
+    "onCommand:julia.profileSelection",
+    "onPositronDataExplorerImport"
   ],
   "contributes": {
     "languageRuntimes": [

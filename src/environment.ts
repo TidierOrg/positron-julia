@@ -12,6 +12,7 @@ import * as path from 'path';
 import { LOGGER } from './extension';
 import { JuliaLanguageClient } from './lsp';
 import { JuliaProjectResolution, hasJuliaProjectFile, resolveJuliaProject } from './julia-project';
+import { juliaStringLiteral } from './julia-data-import';
 
 interface EnvQuickPickItem extends vscode.QuickPickItem {
 	/** The project to activate, or undefined to clear the explicit choice. */
@@ -205,7 +206,7 @@ export class JuliaEnvironmentManager implements vscode.Disposable {
 
 		if (session) {
 			const code = this._current.path
-				? `import Pkg; Pkg.activate(${juliaString(this._current.path)})`
+				? `import Pkg; Pkg.activate(${juliaStringLiteral(this._current.path)})`
 				: 'import Pkg; Pkg.activate()';
 			session.execute(
 				code,
@@ -275,7 +276,7 @@ export class JuliaEnvironmentManager implements vscode.Disposable {
 		// Activate the new project in the running Julia kernel
 		if (session) {
 			session.execute(
-				`import Pkg; Pkg.activate(${juliaString(envPath)})`,
+				`import Pkg; Pkg.activate(${juliaStringLiteral(envPath)})`,
 				`env-switch-${Date.now()}`,
 				positron.RuntimeCodeExecutionMode.Silent,
 				positron.RuntimeErrorBehavior.Continue
@@ -298,9 +299,4 @@ export class JuliaEnvironmentManager implements vscode.Disposable {
 		this._statusBarItem.dispose();
 		this._onDidChangeProject.dispose();
 	}
-}
-
-/** `s` as a Julia string literal. */
-function juliaString(s: string): string {
-	return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$')}"`;
 }
