@@ -2,7 +2,7 @@
   "name": "positron-julia",
   "displayName": "Julia for Positron",
   "description": "Julia language support for Positron IDE",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "publisher": "ntluong95",
   "author": "TidierOrg, rdboyes, ntluong95",
   "contributors": [
@@ -23,7 +23,8 @@
     "url": "https://github.com/TidierOrg/positron-julia"
   },
   "engines": {
-    "vscode": "^1.99.0"
+    "vscode": "^1.99.0",
+    "positron": "^2026.08.0"
   },
   "categories": [
     "Programming Languages",
@@ -55,7 +56,10 @@
     "onCommand:julia.debugEditorContents",
     "onCommand:julia.clearInlineResults",
     "onDebugInitialConfigurations",
-    "onDebugResolve:julia"
+    "onDebugResolve:julia",
+    "onCommand:julia.openProfiler",
+    "onCommand:julia.profileSelection",
+    "onPositronDataExplorerImport"
   ],
   "contributes": {
     "languageRuntimes": [
@@ -234,6 +238,41 @@
         "command": "julia.clearInlineResults",
         "category": "Julia",
         "title": "Clear Inline Results"
+      },
+      {
+        "command": "julia.openProfiler",
+        "category": "Julia",
+        "title": "Open Profiler"
+      },
+      {
+        "command": "julia.profileSelection",
+        "category": "Julia",
+        "title": "Profile Selection",
+        "enablement": "editorLangId == julia"
+      },
+      {
+        "command": "julia.nextProfile",
+        "category": "Julia",
+        "title": "Next Profile",
+        "enablement": "julia.hasProfiles"
+      },
+      {
+        "command": "julia.previousProfile",
+        "category": "Julia",
+        "title": "Previous Profile",
+        "enablement": "julia.hasProfiles"
+      },
+      {
+        "command": "julia.deleteProfile",
+        "category": "Julia",
+        "title": "Delete Profile",
+        "enablement": "julia.hasProfiles"
+      },
+      {
+        "command": "julia.deleteAllProfiles",
+        "category": "Julia",
+        "title": "Delete All Profiles",
+        "enablement": "julia.hasProfiles"
       }
     ],
     "debuggers": [
@@ -370,6 +409,12 @@
           "default": true,
           "scope": "window",
           "markdownDescription": "Allow Julia Help to import installed packages into `Main` when resolving documentation for packages that have not been imported. Restart the Julia session after changing this setting."
+        },
+        "positron.julia.terminal.useConsoleEnvironment": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "markdownDescription": "Start new integrated terminals with the Julia console's Julia first on `PATH` and its project as `JULIA_PROJECT`, so `julia` in a terminal matches the console. Applies while a Julia console is the foreground session."
         },
         "positron.julia.inlineResults.enabled": {
           "type": "boolean",
@@ -597,6 +642,13 @@
           "when": "resourceExtname == .jl || editorLangId == julia",
           "command": "julia.debugEditorContents",
           "group": "navigation@46"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "julia.profileSelection",
+          "when": "editorLangId == julia",
+          "group": "julia@1"
         }
       ]
     },

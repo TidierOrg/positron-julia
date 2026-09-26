@@ -30,6 +30,13 @@ npm run test-positron                          # against the latest stable Posit
 POSITRON_CHANNEL=daily npm run test-positron   # against a daily build
 ```
 
+Tests that start a real Julia session (currently the profiler test) are
+opt-in, since a kernel's first start installs and precompiles its packages:
+
+```bash
+POSITRON_JULIA_SESSION_TESTS=1 npm run test-positron
+```
+
 On Linux, Positron needs a display server, so run it under `xvfb-run` when
 headless:
 

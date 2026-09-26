@@ -2,7 +2,7 @@
 
 julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "7200f38b827c0f9b62129899c86072861673f7d0"
+project_hash = "09175660114a4ef05e895db84f5ddc6409d363b4"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -263,7 +263,7 @@ uuid = "2dfb63ee-cc39-5dd5-95bd-886bf059d720"
 version = "1.4.3"
 
 [[deps.Positron]]
-deps = ["Base64", "DataFrames", "Dates", "IJulia", "JSON3", "Logging", "Markdown", "Pkg", "PrecompileTools", "REPL", "Sockets", "Statistics", "StructTypes", "TOML", "UUIDs"]
+deps = ["Base64", "DataFrames", "Dates", "IJulia", "JSON3", "Logging", "Markdown", "Pkg", "PrecompileTools", "Profile", "REPL", "Sockets", "Statistics", "StructTypes", "TOML", "UUIDs"]
 path = "."
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 version = "0.1.0"
@@ -289,6 +289,11 @@ version = "3.1.2"
 [[deps.Printf]]
 deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+version = "1.11.0"
+
+[[deps.Profile]]
+deps = ["StyledStrings"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
 version = "1.11.0"
 
 [[deps.REPL]]

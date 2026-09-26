@@ -29,7 +29,7 @@ export async function createNewPackage(
   context: vscode.ExtensionContext,
   runtimeManager: JuliaRuntimeManager,
 ): Promise<void> {
-  const installation = runtimeManager.getPreferredInstallation();
+  const installation = await runtimeManager.getPreferredInstallation();
   if (!installation) {
     vscode.window.showErrorMessage(
       "No Julia installation found. Start a Julia interpreter first.",

@@ -19,6 +19,7 @@
   "include": [
     "src/**/*",
     "typings/positron.d.ts",
+    "typings/positron-data-import.d.ts",
     "typings/vscode.d.ts"
   ]
 }

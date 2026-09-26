@@ -25,7 +25,6 @@ import * as vslc from 'vscode-languageclient/node';
 
 import { LOGGER } from '../extension';
 import { JuliaRuntimeManager } from '../runtime-manager';
-import { juliaRuntimeDiscoverer } from '../provider';
 import {
     notificationTypeTestItemStarted,
     notificationTypeTestItemErrored,
@@ -41,6 +40,7 @@ import {
     requestTypeCreateTestRun,
     requestTypeTerminateTestProcess,
 } from './testControllerProtocol';
+import { noResultMessage, OutputTail, settlePendingItems } from './test-run-results';
 import * as tlsp from './testLSProtocol';
 
 // Matches: @testitem "label" ...  (double or single quoted labels)
@@ -228,8 +228,19 @@ export class JuliaTestController {
 
     private connection: rpc.MessageConnection;
     private process: ChildProcessWithoutNullStreams;
-    private testRuns = new Map<string, { testRun: vscode.TestRun, testItems: Map<string, vscode.TestItem>, pendingItems: Set<string> }>();
+    private testRuns = new Map<string, {
+        testRun: vscode.TestRun,
+        testItems: Map<string, vscode.TestItem>,
+        pendingItems: Set<string>,
+        /** Test processes that ended while this run was active. */
+        terminatedProcesses: Set<string>,
+    }>();
     private testProcesses = new Map<string, JuliaTestProcess>();
+    /**
+     * Last output of each test process. Kept after a process ends (its output
+     * channel is disposed) so a crash can be shown on the tests it cut short.
+     */
+    private processTails = new Map<string, { label: string, tail: OutputTail }>();
 
     constructor(
         private testFeature: TestFeature,
@@ -243,10 +254,7 @@ export class JuliaTestController {
     killTestProcess(id: string) { this.connection.sendRequest(requestTypeTerminateTestProcess, { testProcessId: id }); }
 
     public async start(): Promise<boolean> {
-        let binpath: string | undefined = this.runtimeManager.getActiveJuliaSession()?.runtimeMetadata.runtimePath;
-        if (!binpath) {
-            for await (const inst of juliaRuntimeDiscoverer()) { binpath = inst.binpath; break; }
-        }
+        const binpath = (await this.runtimeManager.getPreferredInstallation())?.binpath;
         if (!binpath) {
             vscode.window.showErrorMessage('No Julia installation found. Cannot run tests.');
             return true;
@@ -314,6 +322,7 @@ export class JuliaTestController {
         this.connection.onNotification(notificationTypeTestProcessCreated, i => {
             const tp = new JuliaTestProcess(i.id, i.packageName, i.packageUri, i.projectUri, i.coverage, i.env, this);
             this.testProcesses.set(i.id, tp);
+            this.processTails.set(i.id, { label: `the test process for ${i.packageName}`, tail: new OutputTail() });
         });
         this.connection.onNotification(notificationTypeTestProcessStatusChanged, i => {
             this.testProcesses.get(i.id)?.setStatus(i.status);
@@ -323,9 +332,12 @@ export class JuliaTestController {
                 this.testFeature.testProcessOutputChannels.set(i.id, vscode.window.createOutputChannel(`Julia Test Process ${i.id}`));
             }
             this.testFeature.testProcessOutputChannels.get(i.id)!.append(i.output);
+            this.processTails.get(i.id)?.tail.append(i.output);
         });
         this.connection.onNotification(notificationTypeTestProcessTerminated, i => {
             this.testProcesses.delete(i.id);
+            for (const r of this.testRuns.values()) { r.terminatedProcesses.add(i.id); }
+            this.pruneProcessTails();
             const ch = this.testFeature.testProcessOutputChannels.get(i.id);
             if (ch) { ch.dispose(); this.testFeature.testProcessOutputChannels.delete(i.id); }
         });
@@ -338,17 +350,12 @@ export class JuliaTestController {
             if (this.connection) { this.connection.dispose(); this.connection = null; }
             this._onKilled.fire();
             for (const r of this.testRuns.values()) {
-                if (r.pendingItems.size > 0) {
-                    const msg = new vscode.TestMessage('Test process exited unexpectedly.');
-                    for (const id of r.pendingItems) {
-                        const item = r.testItems.get(id);
-                        if (item) { r.testRun.errored(item, msg); }
-                    }
-                    r.pendingItems.clear();
-                }
+                const msg = new vscode.TestMessage('Test process exited unexpectedly.');
+                settlePendingItems(r, item => r.testRun.errored(item, msg));
                 r.testRun.end();
             }
             this.testRuns.clear();
+            this.processTails.clear();
             this.testFeature.testControllerTerminated();
             if (hadActiveRuns) {
                 this.outputChannel.show(true);
@@ -365,10 +372,7 @@ export class JuliaTestController {
         allTests: { testItem: vscode.TestItem, details: LocalTestItemDetail | tlsp.TestItemDetail, testEnv: tlsp.GetTestEnvRequestParamsReturn }[],
         testSetups: { packageUri?: string, name: string, kind: string, uri: string, line: number, column: number, code: string }[]
     ) {
-        let juliaCmd = this.runtimeManager.getActiveJuliaSession()?.runtimeMetadata.runtimePath;
-        if (!juliaCmd) {
-            for await (const inst of juliaRuntimeDiscoverer()) { juliaCmd = inst.binpath; break; }
-        }
+        const juliaCmd = (await this.runtimeManager.getPreferredInstallation())?.binpath;
         if (!juliaCmd) {
             vscode.window.showErrorMessage('No Julia installation found. Cannot run tests.');
             testRun.end();
@@ -380,6 +384,7 @@ export class JuliaTestController {
             testRun,
             testItems: new Map(allTests.map(t => [t.testItem.id, t.testItem])),
             pendingItems: new Set(allTests.map(t => t.testItem.id)),
+            terminatedProcesses: new Set(),
         });
 
         const params = {
@@ -435,21 +440,40 @@ export class JuliaTestController {
             }
         } catch (err) {
             const r = this.testRuns.get(testRunId);
-            if (r && r.pendingItems.size > 0) {
+            if (r) {
                 const msg = new vscode.TestMessage('Test run failed. Check the Julia Test Item Controller output for details.');
-                for (const id of r.pendingItems) {
-                    const item = r.testItems.get(id);
-                    if (item) { r.testRun.errored(item, msg); }
-                }
-                r.pendingItems.clear();
+                settlePendingItems(r, item => r.testRun.errored(item, msg));
             }
             throw err;
         } finally {
             const r = this.testRuns.get(testRunId);
             if (r) {
+                // A run can finish without reporting every test, e.g. when a test
+                // process crashes (issue #19). Never end with tests left blank.
+                if (testRun.token.isCancellationRequested) {
+                    settlePendingItems(r, item => r.testRun.skipped(item));
+                } else if (r.pendingItems.size > 0) {
+                    const msg = new vscode.TestMessage(noResultMessage(
+                        [...r.terminatedProcesses]
+                            .map(id => this.processTails.get(id))
+                            .filter(t => t !== undefined)
+                            .map(t => ({ label: t.label, tail: t.tail.text }))
+                    ));
+                    settlePendingItems(r, item => r.testRun.errored(item, msg));
+                }
                 r.testRun.end();
                 this.testRuns.delete(testRunId);
+                this.pruneProcessTails();
             }
+        }
+    }
+
+    /** Drops the output of ended processes that no active run still needs. */
+    private pruneProcessTails() {
+        for (const id of this.processTails.keys()) {
+            const needed = this.testProcesses.has(id)
+                || [...this.testRuns.values()].some(r => r.terminatedProcesses.has(id));
+            if (!needed) { this.processTails.delete(id); }
         }
     }
 }

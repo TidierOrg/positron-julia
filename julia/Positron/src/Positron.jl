@@ -45,6 +45,7 @@ include("help.jl")
 include("plots.jl")
 include("data_explorer.jl")
 include("ui.jl")
+include("profile.jl")
 
 # Main integration
 include("kernel.jl")
@@ -53,7 +54,7 @@ include("kernel.jl")
 export PositronKernel, get_kernel, start_services!, stop_services!
 
 # Exports - User-facing functions
-export view, showhelp, show_ui_message
+export view, showhelp, show_ui_message, @profview
 
 # Exports - Test functions
 export test_error_logging, test_ui_notification

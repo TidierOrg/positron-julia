@@ -18,6 +18,7 @@ import {
 
 import { LOGGER } from './extension';
 import { JuliaInstallation } from './julia-installation';
+import { resolveWorkspaceJuliaProject } from './environment';
 
 /**
  * LanguageServer.jl releases whose runserver() signature scripts/languageserver/main.jl
@@ -66,57 +67,20 @@ export class JuliaLanguageClient implements vscode.Disposable {
 		return path.join(this.getLsDepotPath(installation), 'environments', `v${minorVersion}`);
 	}
 
-	private findNearestProjectDir(startPath: string): string | undefined {
-		let dir = startPath;
-		try {
-			const stat = fs.statSync(startPath);
-			if (!stat.isDirectory()) {
-				dir = path.dirname(startPath);
-			}
-		} catch {
-			return undefined;
-		}
-
-		while (true) {
-			if (
-				fs.existsSync(path.join(dir, 'Project.toml')) ||
-				fs.existsSync(path.join(dir, 'JuliaProject.toml'))
-			) {
-				return dir;
-			}
-			const parent = path.dirname(dir);
-			if (parent === dir) {
-				return undefined;
-			}
-			dir = parent;
-		}
-	}
-
 	private resolveEnvironmentPath(
 		installation: JuliaInstallation,
 		preferredFilePath?: string
 	): { path: string; reason: string } {
-		const config = vscode.workspace.getConfiguration('positron.julia');
-		const configuredPath = config.get<string>('languageServer.environmentPath', '').trim();
-
-		if (configuredPath) {
-			const basePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd();
-			const resolvedPath = path.isAbsolute(configuredPath)
-				? configuredPath
-				: path.resolve(basePath, configuredPath);
-			if (fs.existsSync(resolvedPath)) {
-				return { path: resolvedPath, reason: 'user setting (positron.julia.languageServer.environmentPath)' };
-			}
-			LOGGER.warn(`Configured Language Server environment does not exist: ${resolvedPath}`);
-		}
-
+		// The shared resolution (issue #29), searching from the file being
+		// analyzed but never above its workspace root.
 		const candidateFile = preferredFilePath
 			?? vscode.window.activeTextEditor?.document.uri.fsPath;
-		if (candidateFile) {
-			const nearest = this.findNearestProjectDir(candidateFile);
-			if (nearest) {
-				return { path: nearest, reason: `nearest project for ${candidateFile}` };
-			}
+		const project = resolveWorkspaceJuliaProject(candidateFile);
+		if (project.missingSetting) {
+			LOGGER.warn(`Configured Language Server environment does not exist: ${project.missingSetting}`);
+		}
+		if (project.path) {
+			return { path: project.path, reason: project.reason };
 		}
 
 		const minorVersion = installation.version.match(/^(\d+\.\d+)/)?.[1];

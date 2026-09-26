@@ -15,9 +15,15 @@ import { LOGGER } from './extension';
  *
  * @param installation The Julia installation to create a kernel spec for.
  * @param userProjectPath Optional path to the user's Julia project to activate after bootstrapping.
+ * @param explicitProject The user picked `userProjectPath` explicitly: activate it
+ *   even if it has no Project.toml yet.
  * @returns A JupyterKernelSpec for the Julia installation.
  */
-export function createJuliaKernelSpec(installation: JuliaInstallation, userProjectPath?: string): JupyterKernelSpec {
+export function createJuliaKernelSpec(
+	installation: JuliaInstallation,
+	userProjectPath?: string,
+	explicitProject = false,
+): JupyterKernelSpec {
 	// Get the log level from configuration
 	const kernelConfig = vscode.workspace.getConfiguration('positron.julia.kernel');
 	const logLevel = kernelConfig.get<string>('logLevel', 'warn');
@@ -70,6 +76,9 @@ export function createJuliaKernelSpec(installation: JuliaInstallation, userProje
 
 	if (userProjectPath) {
 		env['POSITRON_USER_PROJECT'] = userProjectPath;
+		if (explicitProject) {
+			env['POSITRON_USER_PROJECT_EXPLICIT'] = '1';
+		}
 	}
 
 	// Add any user-configured environment variables
@@ -208,7 +217,10 @@ function getKernelStartupCode(): string {
 		let user_project = get(ENV, "POSITRON_USER_PROJECT", "")
 			if !isempty(user_project) && (
 				isfile(joinpath(user_project, "Project.toml")) ||
-				isfile(joinpath(user_project, "JuliaProject.toml"))
+				isfile(joinpath(user_project, "JuliaProject.toml")) ||
+				# Picked explicitly as a new project: Pkg creates Project.toml
+				# on the first add.
+				get(ENV, "POSITRON_USER_PROJECT_EXPLICIT", "") == "1"
 			)
 				Pkg.activate(user_project)
 			else

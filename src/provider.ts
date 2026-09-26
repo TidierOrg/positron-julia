@@ -17,6 +17,12 @@ import {
 	MIN_JULIA_VERSION,
 	isValidJuliaInstallation
 } from './julia-installation';
+import {
+	JuliaupInstallation,
+	juliaupDirectory,
+	parseJuliaupConfig,
+	resolveInstallationBinary,
+} from './julia-discovery';
 
 interface CommandResult {
 	stdout: string;
@@ -156,7 +162,7 @@ export async function* juliaRuntimeDiscoverer(): AsyncGenerator<JuliaInstallatio
  * control over which Julia version is used. The value can be either an absolute path to
  * a Julia executable or a juliaup channel name (e.g. "1.10", "lts", "release").
  */
-async function discoverFromConfiguredPath(): Promise<JuliaInstallation | undefined> {
+export async function discoverFromConfiguredPath(): Promise<JuliaInstallation | undefined> {
 	const config = vscode.workspace.getConfiguration('positron.julia');
 	const configuredPath = config.get<string>('executablePath', '').trim();
 	if (!configuredPath) {
@@ -180,36 +186,16 @@ async function discoverFromConfiguredPath(): Promise<JuliaInstallation | undefin
 	}
 
 	// Otherwise treat it as a juliaup channel name (e.g. "1.10", "lts", "release").
-	try {
-		const juliaupPath = await resolveCommandPath('juliaup');
-		if (!juliaupPath) {
-			LOGGER.warn(
-				`positron.julia.executablePath is set to "${configuredPath}" ` +
-				`but juliaup was not found in PATH. ` +
-				`Set the value to an absolute path or install juliaup.`
-			);
-			return undefined;
-		}
-
-		const result = await runCommand(juliaupPath, ['which', configuredPath], { timeout: COMMAND_TIMEOUT_MS });
-		if (result.timedOut) {
-			LOGGER.warn(`Timed out resolving juliaup channel "${configuredPath}"`);
-			return undefined;
-		}
-		if (result.exitCode !== 0 || !result.stdout.trim()) {
-			LOGGER.warn(
-				`juliaup channel "${configuredPath}" is not installed. ` +
-				`Run: juliaup add ${configuredPath}`
-			);
-			return undefined;
-		}
-
-		const binpath = result.stdout.trim();
-		return createJuliaInstallation(binpath, ReasonDiscovered.USER_SETTING, true);
-	} catch (error) {
-		LOGGER.debug(`Failed to resolve juliaup channel "${configuredPath}": ${error}`);
+	const version = readJuliaupInstallations().find(v => v.channels.includes(configuredPath));
+	if (!version) {
+		LOGGER.warn(
+			`positron.julia.executablePath is set to "${configuredPath}", ` +
+			`which is not an installed juliaup channel. ` +
+			`Run: juliaup add ${configuredPath}, or set an absolute path.`
+		);
 		return undefined;
 	}
+	return createJuliaInstallation(version.binpath, ReasonDiscovered.USER_SETTING, true);
 }
 
 /**
@@ -228,130 +214,42 @@ async function discoverFromPath(): Promise<JuliaInstallation | undefined> {
 }
 
 /**
- * Discovers Julia installations managed by juliaup.
+ * Versions installed by juliaup, read from its `juliaup.json` (no
+ * subprocess). The default channel's version comes first.
  */
-async function* discoverFromJuliaup(): AsyncGenerator<JuliaInstallation> {
-	// Try command-line juliaup first
-	let foundViaCommand = false;
+function readJuliaupInstallations(): JuliaupInstallation[] {
+	const juliaupDir = juliaupDirectory();
+	const configPath = path.join(juliaupDir, 'juliaup.json');
+	let content: string;
 	try {
-		// Check if juliaup is available
-		const juliaupPath = await resolveCommandPath('juliaup');
-		if (juliaupPath) {
-			foundViaCommand = true;
-
-			// Get juliaup status
-			const statusResult = await runCommand(juliaupPath, ['status'], { timeout: COMMAND_TIMEOUT_MS });
-			if (statusResult.timedOut) {
-				LOGGER.debug('Timed out running juliaup status');
-				return;
-			}
-			if (statusResult.exitCode === 0) {
-				// Parse juliaup status output
-				// Format: " Default  Channel  Version  Update"
-				//         "       *  1.10     1.10.10+0.aarch64.apple.darwin14"
-				const lines = statusResult.stdout.split('\n');
-				for (const line of lines) {
-					const match = line.match(/^\s*(\*)?\s+(\S+)\s+(\S+)/);
-					if (match) {
-						const isDefault = match[1] === '*';
-						const channel = match[2];
-
-						// Skip header line
-						if (channel === 'Channel' || channel === '---') {
-							continue;
-						}
-
-						// Get the actual binary path for this channel
-						try {
-							const pathResult = await runCommand(juliaupPath, ['which', channel], { timeout: COMMAND_TIMEOUT_MS });
-							if (pathResult.timedOut) {
-								LOGGER.debug(`Timed out running juliaup which ${channel}`);
-								continue;
-							}
-							if (pathResult.exitCode === 0 && pathResult.stdout) {
-								const binpath = pathResult.stdout.trim();
-								const installation = await createJuliaInstallation(
-									binpath,
-									ReasonDiscovered.JULIAUP,
-									isDefault
-								);
-								if (installation) {
-									yield installation;
-								}
-							}
-						} catch (error) {
-							LOGGER.debug(`Failed to get path for Julia channel ${channel}: ${error}`);
-						}
-					}
-				}
-			}
-		}
-	} catch (error) {
-		LOGGER.debug(`Failed to discover Julia via juliaup command: ${error}`);
+		content = fs.readFileSync(configPath, 'utf-8');
+	} catch {
+		return []; // juliaup is not installed
 	}
-
-	// If juliaup command wasn't available, try reading juliaup.json directly
-	if (!foundViaCommand) {
-		yield* discoverFromJuliaupDirectory();
+	const installations = parseJuliaupConfig(content, juliaupDir);
+	if (installations.length === 0) {
+		LOGGER.debug(`No installed Julia versions in ${configPath}`);
 	}
+	return installations.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 }
 
 /**
- * Discovers Julia installations by reading the juliaup.json file directly.
- * This is used when the juliaup command isn't available in PATH.
+ * Discovers Julia installations managed by juliaup.
  */
-async function* discoverFromJuliaupDirectory(): AsyncGenerator<JuliaInstallation> {
-	const juliaupDir = path.join(os.homedir(), '.julia', 'juliaup');
-	const juliaupConfigPath = path.join(juliaupDir, 'juliaup.json');
-
-	if (!fs.existsSync(juliaupConfigPath)) {
-		return;
-	}
-
-	try {
-		const configContent = fs.readFileSync(juliaupConfigPath, 'utf-8');
-		const config = JSON.parse(configContent) as {
-			Default?: string;
-			InstalledVersions?: Record<string, { Path: string }>;
-			InstalledChannels?: Record<string, { Version: string }>;
-		};
-
-		const defaultChannel = config.Default;
-		const installedVersions = config.InstalledVersions || {};
-		const installedChannels = config.InstalledChannels || {};
-
-		// Find the default version
-		let defaultVersion: string | undefined;
-		if (defaultChannel && installedChannels[defaultChannel]) {
-			defaultVersion = installedChannels[defaultChannel].Version;
+async function* discoverFromJuliaup(): AsyncGenerator<JuliaInstallation> {
+	for (const version of readJuliaupInstallations()) {
+		if (!fs.existsSync(version.binpath)) {
+			LOGGER.debug(`juliaup lists ${version.binpath} (${version.channels.join(', ')}), but it does not exist`);
+			continue;
 		}
-
-		// Iterate through installed versions
-		for (const [versionKey, versionInfo] of Object.entries(installedVersions)) {
-			let versionPath = versionInfo.Path;
-
-			// Handle relative paths
-			if (versionPath.startsWith('./')) {
-				versionPath = path.join(juliaupDir, versionPath.slice(2));
-			} else if (!path.isAbsolute(versionPath)) {
-				versionPath = path.join(juliaupDir, versionPath);
-			}
-
-			const binpath = path.join(versionPath, 'bin', 'julia');
-			if (fs.existsSync(binpath)) {
-				const isDefault = versionKey === defaultVersion;
-				const installation = await createJuliaInstallation(
-					binpath,
-					ReasonDiscovered.JULIAUP,
-					isDefault
-				);
-				if (installation) {
-					yield installation;
-				}
-			}
+		const installation = await createJuliaInstallation(
+			version.binpath,
+			ReasonDiscovered.JULIAUP,
+			version.isDefault
+		);
+		if (installation) {
+			yield installation;
 		}
-	} catch (error) {
-		LOGGER.debug(`Failed to read juliaup.json: ${error}`);
 	}
 }
 
@@ -525,6 +423,11 @@ async function createJuliaInstallation(
 
 		const version = lines[0].trim();
 		const homepath = lines[1].trim();
+		// Identify the installation by its own binary, not a launcher for it.
+		const installationBinpath = resolveInstallationBinary(binpath, homepath);
+		if (installationBinpath !== binpath) {
+			LOGGER.info(`Resolved Julia launcher ${binpath} -> ${installationBinpath}`);
+		}
 		const arch = lines[2].trim();
 		const releaseDateLine = lines[3]?.trim();
 		const releaseDate = releaseDateLine && /^\d{4}-\d{2}-\d{2}$/.test(releaseDateLine)
@@ -538,7 +441,7 @@ async function createJuliaInstallation(
 		}
 
 		return {
-			binpath,
+			binpath: installationBinpath,
 			homepath,
 			version,
 			semVersion,
